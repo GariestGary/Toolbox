@@ -1,7 +1,7 @@
 {
   "name": "com.volumebox.toolbox",
-  "version": "1.4.17",
-  "displayName": "VolumeBox Toolbox",
+  "version": "1.4.18",
+  "displayName": "Toolbox",
   "description": "Architecture solution for simplifying process of creating games",
   "dependencies": {
 	  "com.cysharp.unitask": "2.5.4"
