@@ -10,7 +10,7 @@ namespace VolumeBox.Toolbox
     {
         private const string PackagePath =
 #if TOOLBOX_DEBUG
-            "Assets/Scripts/Unity Toolbox/Data";
+            "Assets/Scripts/Toolbox/Data";
 #else
             "Packages/com.volumebox.toolbox/Data";
 #endif
