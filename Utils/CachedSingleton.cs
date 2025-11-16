@@ -62,6 +62,8 @@ namespace VolumeBox.Toolbox
 
         private static void ClearInstance()
         {
+            if (applicationQuitting) return;
+            
             applicationQuitting = true;
             Application.quitting -= ClearInstance;
             instance = null;

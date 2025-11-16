@@ -7,6 +7,7 @@ namespace VolumeBox.Toolbox
         private static T instance;
         private static object lockObject = new();
         private static bool applicationQuitting;
+        private static bool initialized;
 
         public static bool HasInstance => instance != null && !applicationQuitting;
 
@@ -21,15 +22,22 @@ namespace VolumeBox.Toolbox
                     if (instance == null && !applicationQuitting)
                     {
                         instance = new T();
+                        Application.quitting += ClearInstance;
+                        initialized = true;
                     }
                     return instance;
                 }
             }
         }
 
-        public void ClearInstance()
+        private static void ClearInstance()
         {
+            if (applicationQuitting) return;
+            
+            applicationQuitting = true;
+            Application.quitting -= ClearInstance;
             instance = null;
+            initialized = false;
         }
 
         [RuntimeInitializeOnLoadMethod]

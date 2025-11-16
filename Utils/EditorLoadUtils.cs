@@ -21,7 +21,7 @@ namespace VolumeBox.Toolbox
         // private const string ProductionScenePath = "Scenes/MAIN.unity";
         private const string MainScenePath =
         #if TOOLBOX_DEBUG
-            "Assets/Scripts/Unity Toolbox/Scenes/MAIN.unity";
+            "Assets/Scripts/Toolbox/Scenes/MAIN.unity";
         #else
             "Assets/Scenes/MAIN.unity";
         #endif
@@ -39,9 +39,9 @@ namespace VolumeBox.Toolbox
         {
             if (StaticData.Settings.AutoResolveScenesAtPlay)
             {
-                SceneAsset myWantedStartScene = AssetDatabase.LoadAssetAtPath<SceneAsset>(MainScenePath);
-                if (myWantedStartScene != null)
-                    EditorSceneManager.playModeStartScene = myWantedStartScene;
+                SceneAsset mainScene = AssetDatabase.LoadAssetAtPath<SceneAsset>(MainScenePath);
+                if (mainScene != null)
+                    EditorSceneManager.playModeStartScene = mainScene;
             }
             else
             {
