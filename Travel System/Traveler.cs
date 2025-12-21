@@ -129,11 +129,14 @@ namespace VolumeBox.Toolbox
             }
             
             var handler = allComponents.Find(x => x is SceneHandlerBase) as SceneHandlerBase;
-            
-            //traverse all components
-            foreach (var component in allComponents)
+
+            if (_traverseAction != null)
             {
-                _traverseAction?.Invoke(component);
+                //traverse all components
+                foreach (var component in allComponents)
+                {
+                    _traverseAction.Invoke(component);
+                }
             }
 
             OpenedScene newOpenedScene = new OpenedScene(sceneDefinition, handler, args);
