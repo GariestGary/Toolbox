@@ -7,7 +7,7 @@ namespace VolumeBox.Toolbox
     {
         protected TArgs Args;
 
-        public sealed override async UniTask OnLoadCallbackAsync(SceneArgs args)
+        internal sealed override async UniTask OnLoadCallbackAsync(SceneArgs args)
         {
             Args = args as TArgs;
 
@@ -22,7 +22,7 @@ namespace VolumeBox.Toolbox
             await SetupSceneAsync(Args);
         }
 
-        public override async UniTask OnUnloadCallbackAsync()
+        internal override async UniTask OnUnloadCallbackAsync()
         {
             await UnloadSceneAsync();
         }
@@ -40,14 +40,14 @@ namespace VolumeBox.Toolbox
 
     public class SceneHandlerBase : MonoCached
     {
-        public virtual async UniTask OnLoadCallbackAsync(SceneArgs args)
+        internal virtual UniTask OnLoadCallbackAsync(SceneArgs args)
         {
-
+            return UniTask.CompletedTask;
         }
 
-        public virtual async UniTask OnUnloadCallbackAsync()
+        internal virtual UniTask OnUnloadCallbackAsync()
         {
-            
+            return UniTask.CompletedTask;
         }
     }
 }

@@ -156,12 +156,10 @@ namespace VolumeBox.Toolbox
         {
             if (obj == null) return;
 
-            MonoCached[] objMonos = obj.GetComponentsInChildren<MonoCached>(true);
+            var objMonos = obj.GetComponentsInChildren<MonoCached>(true);
 
-            for (int i = 0; i < objMonos.Length; i++)
+            foreach (var mono in objMonos)
             {
-                var mono = objMonos[i];
-                
                 if (_RunningMonos.Contains(mono))
                 {
                     continue;
@@ -170,10 +168,8 @@ namespace VolumeBox.Toolbox
                 InvokeRise(mono);
             }
 
-            for (int i = 0; i < objMonos.Length; i++)
+            foreach (var mono in objMonos)
             {
-                var mono = objMonos[i];
-                
                 if (_RunningMonos.Contains(mono))
                 {
                     continue;
@@ -182,10 +178,8 @@ namespace VolumeBox.Toolbox
                 InvokeReady(mono);
             }
             
-            for (int i = 0; i < objMonos.Length; i++)
+            foreach (var mono in objMonos)
             {
-                var mono = objMonos[i];
-                
                 if (_RunningMonos.Contains(mono))
                 {
                     continue;
@@ -193,6 +187,39 @@ namespace VolumeBox.Toolbox
 
                 _RunningMonos.Add(mono);
             }
+        }
+
+        public void InitializeMonos(IEnumerable<MonoCached> monos)
+        {
+            if (monos == null)
+            {
+                return;
+            }
+    
+            // Если _RunningMonos - List, преобразуем в HashSet для O(1) проверок
+            var runningSet = _RunningMonos.ToHashSet();
+    
+            var monosToAdd = monos.Where(mono => runningSet.Add(mono)).ToList();
+    
+            // Один проход для фильтрации
+
+            if (monosToAdd.Count == 0)
+            {
+                return;
+            }
+    
+            // Выполняем операции
+            foreach (var mono in monosToAdd)
+            {
+                InvokeRise(mono);
+            }
+            
+            foreach (var mono in monosToAdd)
+            {
+                InvokeReady(mono);
+            }
+    
+            _RunningMonos.AddRange(monosToAdd);
         }
 
         /// <summary>
