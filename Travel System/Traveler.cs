@@ -116,9 +116,9 @@ namespace VolumeBox.Toolbox
             _currentLoadingSceneOperation = loadingOperation;
             await loadingOperation;
             _Msg.Send(new SceneLoadedMessage(sceneName));
-            Scene sceneDefinition = SceneManager.GetSceneByName(sceneName);
+            var sceneDefinition = SceneManager.GetSceneByName(sceneName);
             await UniTask.DelayFrame(1);
-            GameObject[] sceneObjects = sceneDefinition.GetRootGameObjects();
+            var sceneObjects = sceneDefinition.GetRootGameObjects();
 
             var allComponents = new List<Component>();
 
@@ -129,23 +129,23 @@ namespace VolumeBox.Toolbox
             }
             
             var handler = allComponents.Find(x => x is SceneHandlerBase) as SceneHandlerBase;
-
+            
+            if (handler != null)
+            {
+                await handler.OnLoadCallbackAsync(args);
+            }
+            
             if (_traverseAction != null)
             {
                 //traverse all components
-                foreach (var component in allComponents)
+                foreach (var component in allComponents.Where(component => component != handler))
                 {
                     _traverseAction.Invoke(component);
                 }
             }
 
-            OpenedScene newOpenedScene = new OpenedScene(sceneDefinition, handler, args);
-
-            if (handler != null)
-            {
-                await handler.OnLoadCallbackAsync(args);
-            }
-
+            var newOpenedScene = new OpenedScene(sceneDefinition, handler, args);
+            
             _openedScenes.Add(newOpenedScene);
             
             _Upd.InitializeMonos(allComponents.Where(x => x is MonoCached).Cast<MonoCached>());
