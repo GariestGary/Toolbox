@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -10,6 +11,9 @@ namespace VolumeBox.Toolbox
         
         private bool m_Initialized = false;
         private List<Pool> m_CurrentPools = new List<Pool>();
+        
+        public Func<GameObject> InstantiateFunc;
+        public Func<GameObject> SpawnFunc;
 
         public List<PoolData> Pools => m_Pools;
 
