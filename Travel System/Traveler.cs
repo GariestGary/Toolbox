@@ -16,6 +16,7 @@ namespace VolumeBox.Toolbox
 
         private Messenger _Msg;
         private Updater _Upd;
+        private Action<Component> _traverseAction;
         
         public void Initialize(Messenger msg, Updater upd)
         {
@@ -88,6 +89,11 @@ namespace VolumeBox.Toolbox
             await LoadScene<SceneHandlerBase>(sceneName, args);
         }
 
+        public void SetTraverseAction(Action<Component> action)
+        {
+            _traverseAction = action;
+        }
+
         /// <summary>
         /// Loads scene with given name and args.
         /// </summary>
@@ -110,30 +116,40 @@ namespace VolumeBox.Toolbox
             _currentLoadingSceneOperation = loadingOperation;
             await loadingOperation;
             _Msg.Send(new SceneLoadedMessage(sceneName));
-            Scene sceneDefinition = SceneManager.GetSceneByName(sceneName);
+            var sceneDefinition = SceneManager.GetSceneByName(sceneName);
             await UniTask.DelayFrame(1);
-            GameObject[] sceneObjects = sceneDefinition.GetRootGameObjects();
-            SceneHandlerBase handler = null;
+            var sceneObjects = sceneDefinition.GetRootGameObjects();
 
-            //traverse all objects
+            var allComponents = new List<Component>();
+
             foreach (var obj in sceneObjects)
             {
-                if (handler == null)
+                var components = obj.GetComponentsInChildren<Component>(true);
+                allComponents.AddRange(components);
+            }
+            
+            var handler = allComponents.Find(x => x is SceneHandlerBase) as SceneHandlerBase;
+            
+            if (handler != null)
+            {
+                await handler.OnLoadCallbackAsync(args);
+            }
+            
+            if (_traverseAction != null)
+            {
+                //traverse all components
+                foreach (var component in allComponents.Where(component => component != handler))
                 {
-                    handler = obj.GetComponent<SceneHandlerBase>();
+                    _traverseAction.Invoke(component);
                 }
             }
 
-            OpenedScene newOpenedScene = new OpenedScene(sceneDefinition, handler, args);
-
-            if (handler != null)
-            {
-                _Upd.InitializeMono(handler);
-                await handler.OnLoadCallbackAsync(args);
-            }
-
+            var newOpenedScene = new OpenedScene(sceneDefinition, handler, args);
+            
             _openedScenes.Add(newOpenedScene);
-            _Upd.InitializeObjects(sceneObjects);
+            
+            _Upd.InitializeMonos(allComponents.Where(x => x is MonoCached).Cast<MonoCached>());
+            
             _currentLoadingSceneOperation = null;
             //temp fix for situations when TryGetSceneHandler returns null after receiving SceneOpenedMessage
             await UniTask.DelayFrame(1);
