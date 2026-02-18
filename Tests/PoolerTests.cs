@@ -8,18 +8,21 @@ namespace VolumeBox.Toolbox.Tests
 {
     internal class PoolerTests
     {
+        private int spawnCount;
+        
         [UnityTest, PrebuildSetup(typeof(TestPrebuild))]
         public IEnumerator PoolerSpawnObjectTest()
         {
             GameObject pooledGO = new GameObject("Pooler Test");
-            Toolbox.Pooler.TryAddPool("Test pool", pooledGO, 3);
+            var poolName = "Pool Spawn Test";
+            Toolbox.Pooler.TryAddPool(poolName, pooledGO, 3);
 
-            var test = Toolbox.Pooler.Spawn("Test pool", Vector3.zero, Quaternion.identity);
-            Toolbox.Pooler.Spawn("Test pool", Vector3.zero, Quaternion.identity);
-            Toolbox.Pooler.Spawn("Test pool", Vector3.zero, Quaternion.identity);
+            var test = Toolbox.Pooler.Spawn(poolName, Vector3.zero, Quaternion.identity);
+            Toolbox.Pooler.Spawn(poolName, Vector3.zero, Quaternion.identity);
+            Toolbox.Pooler.Spawn(poolName, Vector3.zero, Quaternion.identity);
             Toolbox.Pooler.DespawnOrDestroy(test);
 
-            var obj = Toolbox.Pooler.Spawn("Test pool", Vector3.zero, Quaternion.identity);
+            var obj = Toolbox.Pooler.Spawn(poolName, Vector3.zero, Quaternion.identity);
             
             Assert.AreEqual
             (
@@ -28,6 +31,67 @@ namespace VolumeBox.Toolbox.Tests
             );
 
             yield return null;
+        }
+        
+        [UnityTest, PrebuildSetup(typeof(TestPrebuild))]
+        public IEnumerator PoolerInstantiateFuncObjectTest()
+        {
+            var initialName = "Pooler Test";
+            GameObject pooledGO = new GameObject(initialName);
+            var poolName = "Pool Instantiate Test";
+            Toolbox.Pooler.TryAddPool(poolName, pooledGO, 3, InstantiateFuncRenameObj);
+
+            var test = Toolbox.Pooler.Spawn(poolName, Vector3.zero, Quaternion.identity);
+            
+            Assert.AreEqual
+            (
+                "instantiated",
+                test.name
+            );
+
+            yield return null;
+        }
+
+        [UnityTest, PrebuildSetup(typeof(TestPrebuild))]
+        public IEnumerator PoolerSpawnActionObjectTest()
+        {
+            spawnCount = 0;
+            var initialName = "Pooler Test";
+            GameObject pooledGO = new GameObject(initialName);
+            var poolName = "Pool Spawn Action Test";
+            Toolbox.Pooler.TryAddPool(poolName, pooledGO, 3, null, SpawnActionRenameObj);
+
+            spawnCount++;
+            var test = Toolbox.Pooler.Spawn(poolName, Vector3.zero, Quaternion.identity);
+            
+            Assert.AreEqual
+            (
+                $"spawned {spawnCount}",
+                test.name
+            );
+
+            spawnCount++;
+            test = Toolbox.Pooler.Spawn(poolName, Vector3.zero, Quaternion.identity);
+
+            Assert.AreEqual
+            (
+                $"spawned {spawnCount}",
+                test.name
+            );
+
+            yield return null;
+        }
+
+        private GameObject InstantiateFuncRenameObj(GameObject obj, Vector3 position, Quaternion rotation, Transform parent)
+        {
+            var inst = Object.Instantiate(obj, position, rotation, parent);
+            inst.name = "instantiated";
+            return inst;
+        }
+
+        private void SpawnActionRenameObj(GameObject obj)
+        {
+            obj.name = $"spawned {spawnCount}";
         }
 
         [UnityTest, PrebuildSetup(typeof(TestPrebuild))]

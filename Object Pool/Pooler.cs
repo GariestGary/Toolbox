@@ -181,7 +181,7 @@ namespace VolumeBox.Toolbox
             return TryRemovePool(poolToRemove);
         }
         
-        public Pool TryAddPool(PoolData poolToAdd, Func<GameObject, GameObject> instantiateFunc = null, Action<GameObject> spawnFunc = null)
+        public Pool TryAddPool(PoolData poolToAdd, Func<GameObject, Vector3, Quaternion, Transform, GameObject> instantiateFunc = null, Action<GameObject> spawnAction = null)
         {
             if(poolToAdd.pooledObject == null)
             {
@@ -203,18 +203,18 @@ namespace VolumeBox.Toolbox
 
             for (int j = 0; j < poolToAdd.size; j++)
             {
-                CreateNewPoolObject(poolToAdd.pooledObject, objectPoolList);
+                CreateNewPoolObject(poolToAdd.pooledObject, objectPoolList, true, instantiateFunc);
             }
 
-            var pool = new Pool(poolToAdd.tag, poolToAdd.pooledObject, poolToAdd.size, objectPoolList, instantiateFunc, spawnFunc);
+            var pool = new Pool(poolToAdd.tag, poolToAdd.pooledObject, poolToAdd.size, objectPoolList, instantiateFunc, spawnAction);
             pools.Add(pool);
             return pool;
         }
 
-        public Pool TryAddPool(string tag, GameObject obj, int size, Func<GameObject, GameObject> instantiateFunc = null, Action<GameObject> spawnFunc = null)
+        public Pool TryAddPool(string tag, GameObject obj, int size, Func<GameObject, Vector3, Quaternion, Transform, GameObject> instantiateFunc = null, Action<GameObject> spawnAction = null)
         {
             PoolData pool = new PoolData() { tag = tag, pooledObject = obj, size = size };
-            return TryAddPool(pool, instantiateFunc, spawnFunc);
+            return TryAddPool(pool, instantiateFunc, spawnAction);
         }
         
         public int GetPoolObjectsCount(string poolTag)
@@ -260,7 +260,7 @@ namespace VolumeBox.Toolbox
             //Create new object if last in list is active
             if (objToSpawn is null)
             {
-                CreateNewPoolObject(poolToUse.referenceObject, poolToUse.objects);
+                CreateNewPoolObject(poolToUse.referenceObject, poolToUse.objects, true, poolToUse.instantiateFunc);
                 objToSpawn = poolToUse.objects.FirstOrDefault(o => !o.Used);
             }
 
@@ -270,9 +270,6 @@ namespace VolumeBox.Toolbox
                 Debug.Log($"object from pool '{poolTag}' you trying to spawn is null");
                 return null;
             }
-
-            //Setting initial name
-            objToSpawn.GameObject.name = poolToUse.referenceObject.name;
 
             //Calling spawn action
             poolToUse.spawnFunc?.Invoke(objToSpawn.GameObject);  
@@ -352,7 +349,13 @@ namespace VolumeBox.Toolbox
         /// <param name="rotation"></param>
         /// <param name="parent"></param>
         /// <returns>Instantiated GameObject</returns>
-        public GameObject Create(GameObject prefab, Vector3 position, Quaternion rotation, Transform parent = null, Func<GameObject, Vector3, Quaternion, Transform, GameObject> instantiateFunc = null)
+        public GameObject Create(
+            GameObject prefab,
+            Vector3 position,
+            Quaternion rotation,
+            Transform parent = null,
+            Func<GameObject, Vector3, Quaternion, Transform, GameObject> instantiateFunc = null
+            )
         {
             GameObject inst = null;
             
@@ -381,19 +384,33 @@ namespace VolumeBox.Toolbox
         /// <param name="prefab">Prefab to Instantiate</param>
         /// <param name="parent">Parent object to instantiated GameObject</param>
         /// <returns>Instantiated GameObject</returns>
-        public GameObject Create(GameObject prefab, Transform parent = null)
+        public GameObject Create(
+            GameObject prefab,
+            Transform parent = null,
+            Func<GameObject, Vector3, Quaternion, Transform, GameObject> instantiateFunc = null
+            )
         {
-            return Create(prefab, Vector3.zero, Quaternion.identity, parent);
+            return Create(prefab, Vector3.zero, Quaternion.identity, parent, instantiateFunc);
         }
 
-        public T Create<T>(GameObject prefab, Transform parent = null) where T: Component
+        public T Create<T>(
+            GameObject prefab,
+            Transform parent = null,
+            Func<GameObject, Vector3, Quaternion, Transform, GameObject> instantiateFunc = null
+            ) where T: Component
         {
-            return Create(prefab, parent).GetComponent<T>();
+            return Create(prefab, parent, instantiateFunc).GetComponent<T>();
         }
 
-        public T Create<T>(GameObject prefab, Vector3 position, Quaternion rotation, Transform parent = null) where T: Component
+        public T Create<T>(
+            GameObject prefab,
+            Vector3 position,
+            Quaternion rotation,
+            Transform parent = null,
+            Func<GameObject, Vector3, Quaternion, Transform, GameObject> instantiateFunc = null
+            ) where T: Component
         {
-            return Create(prefab, position, rotation, parent).GetComponent<T>();
+            return Create(prefab, position, rotation, parent, instantiateFunc).GetComponent<T>();
         }
         
         #endregion
@@ -614,8 +631,6 @@ namespace VolumeBox.Toolbox
             }
 
             GameObject poolObj = Create(obj, poolParent, instantiateFunc);
-
-            poolObj.name = obj.name;
 
             _Upd.InitializeObject(poolObj);
 

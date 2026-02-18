@@ -12,8 +12,8 @@ namespace VolumeBox.Toolbox
         private bool m_Initialized = false;
         private List<Pool> m_CurrentPools = new List<Pool>();
         
-        public Func<GameObject> InstantiateFunc;
-        public Func<GameObject> SpawnFunc;
+        public Func<GameObject, Vector3, Quaternion, Transform, GameObject> InstantiateFunc;
+        public Action<GameObject> SpawnAction;
 
         public List<PoolData> Pools => m_Pools;
 
@@ -41,7 +41,7 @@ namespace VolumeBox.Toolbox
 
             foreach (var pool in m_Pools) 
             {
-                m_CurrentPools.Add(Toolbox.Pooler.TryAddPool(pool));
+                m_CurrentPools.Add(Toolbox.Pooler.TryAddPool(pool, InstantiateFunc, SpawnAction));
             }
 
             m_Initialized = true;
