@@ -2,7 +2,7 @@
 
 # Unity Toolbox
 
-<img src="Icons/toolbox_banner.png" width=100%>
+<img src="Data/toolbox_banner.png" width=100%>
 
 Set of architectural solutions for Unity.
 
