@@ -2,26 +2,40 @@ using UnityEngine;
 
 namespace VolumeBox.Toolbox
 {
-    public class MonoSingleton<T> : MonoBehaviour where T: MonoBehaviour
+    public class MonoSingleton<T> : MonoBehaviour where T : MonoBehaviour
     {
         private static T instance;
-        private static object lockObject = new object();
-        private static bool destroyed = false;
-        private static bool reinstantiateIfDestroyed = true;
-        private static bool initialized = false;
-        private static bool applicationQuitting = false;
+        private static readonly object lockObject = new();
 
-        public static bool HasInstance => initialized && instance != null && !applicationQuitting;
-        
+        private static bool destroyed;
+        private static bool reinstantiateIfDestroyed = true;
+        private static bool applicationQuitting;
+        private static bool subscribedToQuit;
+        private static int observedPlaySessionId = -1;
+
+        public static bool HasInstance
+        {
+            get
+            {
+                EnsureFreshState();
+
+                if (instance == null)
+                    return false;
+
+                if (applicationQuitting)
+                    return false;
+
+                return true;
+            }
+        }
+
         public static bool ReinstantiateIfDestroyed
         {
             get => reinstantiateIfDestroyed;
             set
             {
-                if(value)
-                {
+                if (value)
                     destroyed = false;
-                }
 
                 reinstantiateIfDestroyed = value;
             }
@@ -31,14 +45,24 @@ namespace VolumeBox.Toolbox
         {
             get
             {
-                if (applicationQuitting) return null;
-                if (!reinstantiateIfDestroyed && destroyed) return null;
-                
+                EnsureFreshState();
+
+                if (applicationQuitting)
+                    return null;
+
+                if (!reinstantiateIfDestroyed && destroyed)
+                    return null;
+
                 lock (lockObject)
                 {
-                    if (instance != null) return instance;
-                    if (applicationQuitting) return null;
-                    
+                    EnsureFreshState();
+
+                    if (instance != null)
+                        return instance;
+
+                    if (applicationQuitting)
+                        return null;
+
 #if UNITY_6000_0_OR_NEWER
                     instance = FindFirstObjectByType<T>();
 #else
@@ -47,43 +71,68 @@ namespace VolumeBox.Toolbox
 
                     if (instance == null && !applicationQuitting)
                     {
-                        var singleton = new GameObject("[SINGLETON] " + typeof(T));
+                        var go = new GameObject($"[SINGLETON] {typeof(T).Name}");
+                        instance = go.AddComponent<T>();
                         destroyed = false;
-                        instance = singleton.AddComponent<T>();
                     }
 
-                    if (applicationQuitting) return instance;
-                    
-                    Application.quitting += ClearInstance;
-                    initialized = true;
-                    return instance;
+                    if (instance != null && !subscribedToQuit)
+                    {
+                        Application.quitting += ClearInstance;
+                        subscribedToQuit = true;
+                    }
+
+                    return applicationQuitting ? null : instance;
                 }
             }
         }
 
-        private static void ClearInstance()
+        protected virtual void OnDestroy()
         {
-            if (applicationQuitting) return;
-            
-            applicationQuitting = true;
-            Application.quitting -= ClearInstance;
-            instance = null;
-            destroyed = true;
-            initialized = false;
-        }
-        
-        private void OnDestroy()
-        {
-            if (initialized && !applicationQuitting)
+            // Ignore stale callbacks from previous play sessions when domain reload is off.
+            if (observedPlaySessionId != SingletonRuntime.PlaySessionId)
+                return;
+
+            if (ReferenceEquals(instance, this))
             {
-                ClearInstance();
+                instance = null;
+                destroyed = true;
             }
         }
 
-        [RuntimeInitializeOnLoadMethod]
-        private static void InitializeOnLoad()
+        private static void EnsureFreshState()
         {
+            int currentSession = SingletonRuntime.PlaySessionId;
+            if (observedPlaySessionId == currentSession)
+                return;
+
+            observedPlaySessionId = currentSession;
+
+            if (subscribedToQuit)
+            {
+                Application.quitting -= ClearInstance;
+                subscribedToQuit = false;
+            }
+
+            instance = null;
+            destroyed = false;
             applicationQuitting = false;
+        }
+
+        private static void ClearInstance()
+        {
+            if (applicationQuitting)
+                return;
+
+            applicationQuitting = true;
+            instance = null;
+            destroyed = true;
+
+            if (subscribedToQuit)
+            {
+                Application.quitting -= ClearInstance;
+                subscribedToQuit = false;
+            }
         }
     }
 }

@@ -2,48 +2,84 @@ using UnityEngine;
 
 namespace VolumeBox.Toolbox
 {
-    public class Singleton<T> where T: class, new()
+    public class Singleton<T> where T : class, new()
     {
         private static T instance;
-        private static object lockObject = new();
-        private static bool applicationQuitting;
-        private static bool initialized;
+        private static readonly object lockObject = new();
 
-        public static bool HasInstance => instance != null && !applicationQuitting;
+        private static bool applicationQuitting;
+        private static bool subscribedToQuit;
+        private static int observedPlaySessionId = -1;
+
+        public static bool HasInstance
+        {
+            get
+            {
+                EnsureFreshState();
+                return instance != null && !applicationQuitting;
+            }
+        }
 
         public static T Instance
         {
             get
             {
-                if (applicationQuitting) return null;
-                
+                EnsureFreshState();
+
+                if (applicationQuitting)
+                    return null;
+
                 lock (lockObject)
                 {
+                    EnsureFreshState();
+
                     if (instance == null && !applicationQuitting)
                     {
                         instance = new T();
-                        Application.quitting += ClearInstance;
-                        initialized = true;
+
+                        if (!subscribedToQuit)
+                        {
+                            Application.quitting += ClearInstance;
+                            subscribedToQuit = true;
+                        }
                     }
+
                     return instance;
                 }
             }
         }
 
-        private static void ClearInstance()
+        private static void EnsureFreshState()
         {
-            if (applicationQuitting) return;
-            
-            applicationQuitting = true;
-            Application.quitting -= ClearInstance;
+            int currentSession = SingletonRuntime.PlaySessionId;
+            if (observedPlaySessionId == currentSession)
+                return;
+
+            observedPlaySessionId = currentSession;
+
+            applicationQuitting = false;
             instance = null;
-            initialized = false;
+
+            if (subscribedToQuit)
+            {
+                Application.quitting -= ClearInstance;
+                subscribedToQuit = false;
+            }
         }
 
-        [RuntimeInitializeOnLoadMethod]
-        private static void InitializeOnLoad()
+        private static void ClearInstance()
         {
-            applicationQuitting = false;
+            if (applicationQuitting)
+                return;
+
+            applicationQuitting = true;
+            instance = null;
+
+            if (subscribedToQuit)
+            {
+                Application.quitting -= ClearInstance;
+                subscribedToQuit = false;
+            }
         }
     }
 }

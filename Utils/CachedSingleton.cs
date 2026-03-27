@@ -2,37 +2,63 @@ using UnityEngine;
 
 namespace VolumeBox.Toolbox
 {
-    public class CachedSingleton<T>: MonoCached where T: MonoCached
+    public class CachedSingleton<T> : MonoCached where T : MonoCached
     {
         private static T instance;
-        private static object lockObject = new();
+        private static readonly object lockObject = new();
+
         private static bool destroyed;
         private static bool reinstantiateIfDestroyed = true;
-        private static bool initialized;
         private static bool applicationQuitting;
+        private static bool subscribedToQuit;
+        private static int observedPlaySessionId = -1;
 
-        public static bool HasInstance => instance != null && !applicationQuitting;
+        public static bool HasInstance
+        {
+            get
+            {
+                EnsureFreshState();
+                return instance != null && !applicationQuitting;
+            }
+        }
 
         public static bool ReinstantiateIfDestroyed
         {
             get => reinstantiateIfDestroyed;
-            set => reinstantiateIfDestroyed = value;
+            set
+            {
+                if (value)
+                    destroyed = false;
+
+                reinstantiateIfDestroyed = value;
+            }
         }
 
         public static T Instance
         {
             get
             {
-                if (applicationQuitting) return null;
-                
-                if (!reinstantiateIfDestroyed && destroyed) return null;
+                EnsureFreshState();
+
+                if (applicationQuitting)
+                    return null;
+
+                if (!reinstantiateIfDestroyed && destroyed)
+                    return null;
 
                 lock (lockObject)
                 {
-                    if (instance != null) return instance;
-                    if (applicationQuitting) return null;
-                    
-#if UNITY_6000_0_OR_NEWER
+                    EnsureFreshState();
+
+                    if (instance != null)
+                        return instance;
+
+                    if (applicationQuitting)
+                        return null;
+
+#if UNITY_6000_3_OR_NEWER
+                    instance = FindAnyObjectByType<T>();
+#elif UNITY_6000_0_OR_NEWER
                     instance = FindFirstObjectByType<T>();
 #else
                     instance = FindObjectOfType<T>();
@@ -40,59 +66,88 @@ namespace VolumeBox.Toolbox
 
                     if (instance == null && !applicationQuitting)
                     {
-                        var singleton = new GameObject("[SINGLETON] " + typeof(T));
+                        var go = new GameObject($"[SINGLETON] {typeof(T).Name}");
+                        instance = go.AddComponent<T>();
                         destroyed = false;
-                        instance = singleton.AddComponent<T>();
                     }
 
-                    if (applicationQuitting) return instance;
-                    
-                    Application.quitting += ClearInstance;
-                    initialized = true;
+                    if (instance != null && !subscribedToQuit)
+                    {
+                        Application.quitting += ClearInstance;
+                        subscribedToQuit = true;
+                    }
 
-                    return instance;
+                    return applicationQuitting ? null : instance;
                 }
             }
         }
 
         public static void DontDestroy()
         {
-            DontDestroyOnLoad(instance.gameObject);
+            var current = Instance;
+            if (current != null)
+                DontDestroyOnLoad(current.gameObject);
+        }
+
+        private static void EnsureFreshState()
+        {
+            int currentSession = SingletonRuntime.PlaySessionId;
+            if (observedPlaySessionId == currentSession)
+                return;
+
+            observedPlaySessionId = currentSession;
+
+            if (subscribedToQuit)
+            {
+                Application.quitting -= ClearInstance;
+                subscribedToQuit = false;
+            }
+
+            instance = null;
+            destroyed = false;
+            applicationQuitting = false;
         }
 
         private static void ClearInstance()
         {
-            if (applicationQuitting) return;
-            
+            if (applicationQuitting)
+                return;
+
             applicationQuitting = true;
-            Application.quitting -= ClearInstance;
             instance = null;
             destroyed = true;
-            initialized = false;
+
+            if (subscribedToQuit)
+            {
+                Application.quitting -= ClearInstance;
+                subscribedToQuit = false;
+            }
         }
 
         protected override void Destroyed()
         {
-            if (initialized && !applicationQuitting)
+            if (observedPlaySessionId != SingletonRuntime.PlaySessionId)
+                return;
+
+            if (ReferenceEquals(instance, this))
             {
-                ClearInstance();
+                instance = null;
+                destroyed = true;
             }
+
+            base.Destroyed();
         }
 
-        private void OnDestroy()
+        protected virtual void OnDestroy()
         {
-            if (initialized && !applicationQuitting)
-            {
-                ClearInstance();
-            }
-        }
+            if (observedPlaySessionId != SingletonRuntime.PlaySessionId)
+                return;
 
-        [RuntimeInitializeOnLoadMethod]
-        private static void InitializeOnLoad()
-        {
-            applicationQuitting = false;
-            destroyed = false;
-            initialized = false;
+            if (ReferenceEquals(instance, this))
+            {
+                instance = null;
+                destroyed = true;
+            }
         }
     }
 }
