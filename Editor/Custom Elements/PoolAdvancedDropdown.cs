@@ -1,9 +1,5 @@
 using System;
-using System.Linq;
-using UnityEditor;
 using UnityEditor.IMGUI.Controls;
-using UnityEngine;
-using static UnityEngine.GraphicsBuffer;
 
 namespace VolumeBox.Toolbox.Editor
 {
@@ -24,12 +20,13 @@ namespace VolumeBox.Toolbox.Editor
             m_PoolerEntries = poolerEntries;
             m_SceneEntries = sceneEntries;
             m_SceneName = sceneName;
+            minimumSize = new UnityEngine.Vector2(260f, 320f);
         }
 
         protected override AdvancedDropdownItem BuildRoot()
         {
             var root = new AdvancedDropdownItem("Pools");
-
+            
             if(m_PoolerEntries.Length > 0)
             {
                 var poolerRoot = new AdvancedDropdownItem("Pooler");
