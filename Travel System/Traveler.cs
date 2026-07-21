@@ -183,11 +183,7 @@ namespace VolumeBox.Toolbox
             _Upd.RemoveObjectsFromUpdate(sceneToUnload.SceneDefinition.GetRootGameObjects());
 
             _currentUnloadingSceneOperation = SceneManager.UnloadSceneAsync(sceneName);
-
-            while (_currentLoadingSceneOperation != null && !_currentUnloadingSceneOperation.isDone)
-            {
-                await UniTask.Yield();
-            }
+            await _currentUnloadingSceneOperation;
 
             _currentUnloadingSceneOperation = null;
             await Resources.UnloadUnusedAssets();
@@ -200,10 +196,8 @@ namespace VolumeBox.Toolbox
             if(!CanLoadSceneNow(sceneName))
             {
                 await UniTask.WaitUntil(() =>
-                _currentUnloadingSceneOperation == null || 
-                _currentUnloadingSceneOperation.isDone && 
-                _currentLoadingSceneOperation == null || 
-                _currentLoadingSceneOperation.isDone);
+                    (_currentUnloadingSceneOperation == null || _currentUnloadingSceneOperation.isDone) &&
+                    (_currentLoadingSceneOperation == null || _currentLoadingSceneOperation.isDone));
 
                 _currentLoadingSceneOperation = null;
                 _currentUnloadingSceneOperation = null;
