@@ -10,6 +10,7 @@ namespace VolumeBox.Toolbox.Editor
     {
         private GUISkin m_Skin;
 
+        private SerializedProperty m_ScenePoolName;
         private SerializedProperty m_poolsList;
         private SerializedProperty m_RunType;
         private string searchValue;
@@ -30,6 +31,7 @@ namespace VolumeBox.Toolbox.Editor
                 return;
             }
 
+            m_ScenePoolName = serializedObject.FindProperty("m_ScenePoolName");
             m_poolsList = serializedObject.FindProperty("m_Pools");
             m_RunType = serializedObject.FindProperty("m_RunType");
         }
@@ -39,6 +41,9 @@ namespace VolumeBox.Toolbox.Editor
             serializedObject.Update();
 
             EditorGUI.BeginChangeCheck();
+
+            EditorGUILayout.PropertyField(m_ScenePoolName, new GUIContent("Pool Name"));
+            EditorGUILayout.Space(3);
 
             EditorGUI.indentLevel--;
             EditorGUILayout.BeginHorizontal();

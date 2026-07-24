@@ -6,6 +6,7 @@ namespace VolumeBox.Toolbox
 {
     public class ScenePool : MonoCached
     {
+        [SerializeField] private string m_ScenePoolName;
         [SerializeField] private List<PoolData> m_Pools;
         [SerializeField] private int m_RunType = 0;
         
@@ -15,6 +16,7 @@ namespace VolumeBox.Toolbox
         public Func<GameObject, Vector3, Quaternion, Transform, GameObject> InstantiateFunc;
         public Action<GameObject> SpawnAction;
 
+        public string Name => m_ScenePoolName;
         public List<PoolData> Pools => m_Pools;
 
         protected override void Rise()

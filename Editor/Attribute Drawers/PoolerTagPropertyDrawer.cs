@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
 using UnityEditor.Presets;
@@ -11,8 +12,7 @@ namespace VolumeBox.Toolbox.Editor
         private PoolAdvancedDropdown m_Dropdown;
         private PoolerDataHolder m_DataHolder;
         private string[] m_PoolerEntries;
-        private string[] m_SceneEntries;
-        private string m_SceneName;
+        private List<PoolDropdownGroup> m_ScenePoolGroups;
         private bool m_ManualEnabled = false;
 
         public static bool IsPoolsChanged { get; set; }
@@ -31,7 +31,7 @@ namespace VolumeBox.Toolbox.Editor
             var poolRect = position;
             poolRect.x += labelRect.width;
             poolRect.width -= labelRect.width + 20;
-            bool hasPools = m_PoolerEntries.Length > 0 || m_SceneEntries.Length > 0;
+            bool hasPools = m_PoolerEntries.Length > 0 || m_ScenePoolGroups.Count > 0;
             
             if(!hasPools && !m_ManualEnabled && !property.stringValue.IsValuable())
             {
@@ -75,12 +75,11 @@ namespace VolumeBox.Toolbox.Editor
             if(property.GetValue() is Component)
             {
                 var gameObject = (property.GetValue() as Component).gameObject;
-                m_SceneEntries = GetSceneEntries(gameObject);
-                m_SceneName = gameObject.scene.name;
+                m_ScenePoolGroups = GetScenePoolGroups(gameObject);
             }
             else
             {
-                m_SceneEntries = new string[0];
+                m_ScenePoolGroups = new List<PoolDropdownGroup>();
             }
         }
 
@@ -89,8 +88,7 @@ namespace VolumeBox.Toolbox.Editor
             m_Dropdown = new PoolAdvancedDropdown(
                     new UnityEditor.IMGUI.Controls.AdvancedDropdownState(),
                     m_PoolerEntries,
-                    m_SceneEntries,
-                    m_SceneName,
+                    m_ScenePoolGroups,
                     name => OnPoolSelectedCallback(name, property));
         }
 
@@ -105,7 +103,7 @@ namespace VolumeBox.Toolbox.Editor
         {
             var entries = new string[0];
 
-            if (dataHolder.PoolsList.Count > 0)
+            if (dataHolder != null && dataHolder.PoolsList.Count > 0)
             {
                 entries = new string[dataHolder.PoolsList.Count];
 
@@ -118,24 +116,32 @@ namespace VolumeBox.Toolbox.Editor
             return entries;
         }
 
-        private string[] GetSceneEntries(GameObject sceneObject)
+        private List<PoolDropdownGroup> GetScenePoolGroups(GameObject sceneObject)
         {
-            var scenePools = Resources.FindObjectsOfTypeAll<ScenePool>().Where(x => x.gameObject.scene == sceneObject.scene).ToArray();
+            var scenePools = Resources.FindObjectsOfTypeAll<ScenePool>()
+                .Where(x => x.gameObject.scene == sceneObject.scene)
+                .OrderBy(x => x.Name)
+                .ToArray();
 
-            var entries = new string[0];
+            var groups = new List<PoolDropdownGroup>();
 
-            if (scenePools.Length > 0)
+            for (int i = 0; i < scenePools.Length; i++)
             {
-                for (int i = 0; i < scenePools.Length; i++)
+                var entries = scenePools[i].Pools
+                    .Select(pool => pool.tag)
+                    .Where(tag => tag.IsValuable())
+                    .ToArray();
+
+                if (entries.Length > 0)
                 {
-                    for (int j = 0; j < scenePools[i].Pools.Count; j++)
-                    {
-                        entries = entries.Append(scenePools[i].Pools[j].tag).ToArray();
-                    }
+                    var groupName = scenePools[i].Name.IsValuable()
+                        ? scenePools[i].Name
+                        : scenePools[i].gameObject.name;
+                    groups.Add(new PoolDropdownGroup(groupName, entries));
                 }
             }
 
-            return entries;
+            return groups;
         }
     }
 }

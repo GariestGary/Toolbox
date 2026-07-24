@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEditor.IMGUI.Controls;
 
 namespace VolumeBox.Toolbox.Editor
@@ -7,19 +8,21 @@ namespace VolumeBox.Toolbox.Editor
     {
         private Action<string> m_OnPoolSelectedCallback;
         private string[] m_PoolerEntries;
-        private string[] m_SceneEntries;
-        private string m_SceneName;
+        private List<PoolDropdownGroup> m_ScenePoolGroups;
 
         public PoolAdvancedDropdown(AdvancedDropdownState state) : base(state)
         {
         }
 
-        public PoolAdvancedDropdown(AdvancedDropdownState state, string[] poolerEntries, string[] sceneEntries, string sceneName, Action<string> onPoolSelectedCallback) : base(state)
+        public PoolAdvancedDropdown(
+            AdvancedDropdownState state,
+            string[] poolerEntries,
+            List<PoolDropdownGroup> scenePoolGroups,
+            Action<string> onPoolSelectedCallback) : base(state)
         {
             m_OnPoolSelectedCallback = onPoolSelectedCallback;
             m_PoolerEntries = poolerEntries;
-            m_SceneEntries = sceneEntries;
-            m_SceneName = sceneName;
+            m_ScenePoolGroups = scenePoolGroups;
             minimumSize = new UnityEngine.Vector2(260f, 320f);
         }
 
@@ -29,7 +32,7 @@ namespace VolumeBox.Toolbox.Editor
             
             if(m_PoolerEntries.Length > 0)
             {
-                var poolerRoot = new AdvancedDropdownItem("Pooler");
+                var poolerRoot = new AdvancedDropdownItem("Main Pool");
 
                 for (int i = 0; i < m_PoolerEntries.Length; i++)
                 {
@@ -39,16 +42,17 @@ namespace VolumeBox.Toolbox.Editor
                 root.AddChild(poolerRoot);
             }
 
-            if(m_SceneEntries.Length > 0)
+            for (int i = 0; i < m_ScenePoolGroups.Count; i++)
             {
-                var sceneRoot = new AdvancedDropdownItem(m_SceneName);
+                var scenePoolRoot = new AdvancedDropdownItem(m_ScenePoolGroups[i].Name);
 
-                for (int i = 0; i < m_SceneEntries.Length; i++)
+                for (int j = 0; j < m_ScenePoolGroups[i].Entries.Length; j++)
                 {
-                    sceneRoot.AddChild(new PoolAdvancedDropdownItem(m_SceneEntries[i], m_SceneEntries[i]));
+                    var poolName = m_ScenePoolGroups[i].Entries[j];
+                    scenePoolRoot.AddChild(new PoolAdvancedDropdownItem(poolName, poolName));
                 }
 
-                root.AddChild(sceneRoot);
+                root.AddChild(scenePoolRoot);
             }
 
             return root;
@@ -58,11 +62,24 @@ namespace VolumeBox.Toolbox.Editor
         {
             base.ItemSelected(item);
 
-            var poolItem = item as PoolAdvancedDropdownItem;
-
-            m_OnPoolSelectedCallback?.Invoke(poolItem.PoolName);
+            if (item is PoolAdvancedDropdownItem poolItem)
+            {
+                m_OnPoolSelectedCallback?.Invoke(poolItem.PoolName);
+            }
         }
 
+    }
+
+    public class PoolDropdownGroup
+    {
+        public string Name { get; }
+        public string[] Entries { get; }
+
+        public PoolDropdownGroup(string name, string[] entries)
+        {
+            Name = name;
+            Entries = entries;
+        }
     }
 
     public class PoolAdvancedDropdownItem: AdvancedDropdownItem
