@@ -5,7 +5,8 @@ using UnityEngine.TestTools;
 
 namespace VolumeBox.Toolbox.Tests
 {
-    internal class UpdaterTests
+    [PrebuildSetup(typeof(TestPrebuild))]
+    internal class UpdaterTests : ToolboxTestBase
     {
         [UnityTest, PrebuildSetup(typeof(TestPrebuild))]
         public IEnumerator TimeScaleTest()
@@ -29,15 +30,21 @@ namespace VolumeBox.Toolbox.Tests
             Toolbox.Updater.InitializeObject(testGO);
             Toolbox.Updater.TimeScale = 1;
 
-            foo.Interval = 1;
+            const float interval = 0.1f;
+            const float timeout = 1f;
+            foo.Interval = interval;
 
-            yield return null;
+            var deadline = Time.realtimeSinceStartup + timeout;
 
-            Assert.AreEqual(true, foo.counter < 1);
+            while (foo.counter <= 0 && Time.realtimeSinceStartup < deadline)
+            {
+                yield return null;
+            }
 
-            yield return new WaitForSeconds(1);
-            Debug.Log(foo.counter);
-            Assert.AreEqual(true, foo.counter >= 1);
+            Assert.Greater(foo.counter, 0, $"Interval callback did not run within {timeout} seconds");
+            Assert.GreaterOrEqual(foo.counter, interval, "Interval callback ran before enough time was accumulated");
+
+            UnityEngine.Object.DestroyImmediate(testGO);
         }
 
         [UnityTest, PrebuildSetup(typeof(TestPrebuild))]
@@ -55,6 +62,23 @@ namespace VolumeBox.Toolbox.Tests
             foo.IgnoreTimeScale = false;
             yield return null;
             Assert.AreEqual(true, foo.Delta == 0);
+        }
+
+        [UnityTest, PrebuildSetup(typeof(TestPrebuild))]
+        public IEnumerator InitializeMonoIgnoresDuplicatesAndNullsTest()
+        {
+            var testGO = new GameObject("Updater duplicate test");
+            var foo = testGO.AddComponent<Foo>();
+
+            Assert.DoesNotThrow(() => Toolbox.Updater.InitializeMonos(new MonoCached[] { null }));
+
+            Toolbox.Updater.InitializeMono(foo);
+            Toolbox.Updater.InitializeMono(foo);
+
+            yield return null;
+
+            Assert.AreEqual(1, foo.TickCount);
+            UnityEngine.Object.DestroyImmediate(testGO);
         }
     }
 }

@@ -199,7 +199,7 @@ namespace VolumeBox.Toolbox
             // Если _RunningMonos - List, преобразуем в HashSet для O(1) проверок
             var runningSet = _RunningMonos.ToHashSet();
     
-            var monosToAdd = monos.Where(mono => runningSet.Add(mono)).ToList();
+            var monosToAdd = monos.Where(mono => mono != null && runningSet.Add(mono)).ToList();
     
             // Один проход для фильтрации
 
@@ -227,7 +227,7 @@ namespace VolumeBox.Toolbox
         /// </summary>
         public void InitializeMono(MonoCached mono)
         {
-            if (mono == null && !_RunningMonos.Contains(mono)) return;
+            if (mono == null || _RunningMonos.Contains(mono)) return;
 
             InvokeRise(mono);
             InvokeReady(mono);

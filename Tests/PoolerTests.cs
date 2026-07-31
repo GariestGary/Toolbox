@@ -6,7 +6,8 @@ using UnityEngine.TestTools;
 
 namespace VolumeBox.Toolbox.Tests
 {
-    internal class PoolerTests
+    [PrebuildSetup(typeof(TestPrebuild))]
+    internal class PoolerTests : ToolboxTestBase
     {
         private int spawnCount;
         

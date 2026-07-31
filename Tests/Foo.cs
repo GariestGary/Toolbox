@@ -8,10 +8,12 @@ namespace VolumeBox.Toolbox.Tests
     internal class Foo: MonoCached
     {
         public float Delta => delta;
+        public int TickCount { get; private set; }
         public float counter = 0;
 
         protected override void Tick()
         {
+            TickCount++;
             counter += delta;
         }
     }

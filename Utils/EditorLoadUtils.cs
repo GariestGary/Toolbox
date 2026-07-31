@@ -84,23 +84,41 @@ namespace VolumeBox.Toolbox
                 }
             }
 
-            var parentAssetPath = Directory.GetParent(Application.dataPath);
-            var fullProductionPath = parentAssetPath + "/" + MainScenePath;
+            var projectDirectory = Directory.GetParent(Application.dataPath)?.FullName;
+
+            if (string.IsNullOrEmpty(projectDirectory))
+            {
+                Debug.LogError("Unable to resolve the Unity project directory");
+                return;
+            }
+
+            var fullProductionPath = Path.Combine(projectDirectory, MainScenePath);
             
             if (!File.Exists(fullProductionPath))
             {
-                var fullPackagePath = parentAssetPath + "/" + PackageScenePath;
+                var fullPackagePath = Path.Combine(projectDirectory, PackageScenePath);
             
-                if (!File.Exists(fullProductionPath))
+                if (!File.Exists(fullPackagePath))
                 {
-                    var dir = Directory.GetParent(MainScenePath).FullName;
+                    Debug.LogError($"Toolbox MAIN scene was not found at '{fullPackagePath}'");
+                    return;
+                }
 
-                    if (!Directory.Exists(dir))
+                var destinationDirectory = Path.GetDirectoryName(fullProductionPath);
+
+                try
+                {
+                    if (!Directory.Exists(destinationDirectory))
                     {
-                        Directory.CreateDirectory(dir);
+                        Directory.CreateDirectory(destinationDirectory);
                     }
                     
                     await ToolboxExtensions.CopyFileAsync(fullPackagePath, fullProductionPath);
+                }
+                catch (Exception exception)
+                {
+                    Debug.LogException(exception);
+                    return;
                 }
             }
                 
