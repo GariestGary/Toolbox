@@ -5,6 +5,7 @@ using UnityEngine.TestTools;
 
 namespace VolumeBox.Toolbox.Tests
 {
+    [PrebuildSetup(typeof(TestPrebuild))]
     internal class MonoCachedTests
     {
         [UnityTest]

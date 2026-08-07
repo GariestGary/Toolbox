@@ -282,7 +282,11 @@ namespace VolumeBox.Toolbox
         {
             if(Toolbox.HasInstance)
             {
-                Toolbox.Updater.RemoveMonoFromUpdate(this);
+                var updater = Toolbox.Updater;
+                if (updater != null)
+                {
+                    updater.RemoveMonoFromUpdate(this);
+                }
             }
 
             if (raised)

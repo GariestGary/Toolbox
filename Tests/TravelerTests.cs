@@ -9,7 +9,8 @@ using VolumeBox.Toolbox;
 
 namespace VolumeBox.Toolbox.Tests
 {
-    internal class TravelerTests
+    [PrebuildSetup(typeof(TestPrebuild))]
+    internal class TravelerTests : ToolboxTestBase
     {
         public static string compare = "null";
 

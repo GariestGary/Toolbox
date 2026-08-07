@@ -162,13 +162,13 @@ namespace VolumeBox.Toolbox
 					if(receiver.HasBind && (receiver.BindedObject == null))
 					{
 						RemoveSubscriber(receiver);
-						return;
+						continue;
 					}
 				}
 				catch
 				{
 					RemoveSubscriber(receiver);
-					return;
+					continue;
 
 				}
 
@@ -197,8 +197,8 @@ namespace VolumeBox.Toolbox
 
 		public void Clear()
 		{
-			subscribers?.Clear();
-			subscribers = null;
+			subscribers.Clear();
+			_MessagesCache.Clear();
 		}
 	}
 }

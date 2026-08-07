@@ -62,9 +62,14 @@ namespace VolumeBox.Toolbox
 
         private void ClearAll()
         {
-            _Pool.Clear();
-            _Msg.Clear();
-            _Upd.Clear();
+            if (_Pool != null)
+                _Pool.Clear();
+
+            if (_Msg != null)
+                _Msg.Clear();
+
+            if (_Upd != null)
+                _Upd.Clear();
         }
 
         private void OnApplicationQuit()

@@ -71,6 +71,12 @@ namespace VolumeBox.Toolbox
         
         public void Play(AudioClip clip, float volume = 1, float pitch = 1, bool loop = false, PlayType playType = PlayType.ONE_SHOT)
         {
+            if (clip == null)
+            {
+                Debug.LogWarning($"Cannot play a null clip from album '{AlbumName}'");
+                return;
+            }
+
             AudioPlayer.Play(_Album.source, clip, volume, pitch, loop, playType);
             CurrentPlayState = PlayState.PLAYING;
             _CurrentClipDuration = clip.length;
