@@ -424,7 +424,7 @@ namespace VolumeBox.Toolbox
         /// <param name="delay">delay before despawning</param>
         public bool TryDespawn(GameObject objectToDespawn)
         {
-            if (objectToDespawn == null)
+            if (objectToDespawn == null || pools == null)
             {
                 return false;
             }

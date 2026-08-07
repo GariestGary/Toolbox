@@ -9,6 +9,26 @@ namespace VolumeBox.Toolbox.Tests
     internal class PoolerTests
     {
         private int spawnCount;
+
+        [Test]
+        public void TryDespawn_AfterClear_ReturnsFalse()
+        {
+            var poolerObject = new GameObject("Cleared Pooler Test");
+            var objectToDespawn = new GameObject("Object To Despawn");
+            var pooler = poolerObject.AddComponent<Pooler>();
+
+            try
+            {
+                pooler.Clear();
+
+                Assert.IsFalse(pooler.TryDespawn(objectToDespawn));
+            }
+            finally
+            {
+                Object.DestroyImmediate(objectToDespawn);
+                Object.DestroyImmediate(poolerObject);
+            }
+        }
         
         [UnityTest, PrebuildSetup(typeof(TestPrebuild))]
         public IEnumerator PoolerSpawnObjectTest()
