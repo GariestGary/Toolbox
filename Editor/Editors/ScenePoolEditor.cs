@@ -34,6 +34,7 @@ namespace VolumeBox.Toolbox.Editor
             m_ScenePoolName = serializedObject.FindProperty("m_ScenePoolName");
             m_poolsList = serializedObject.FindProperty("m_Pools");
             m_RunType = serializedObject.FindProperty("m_RunType");
+            m_Skin = ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin");
         }
 
         public override void OnInspectorGUI()
@@ -75,12 +76,12 @@ namespace VolumeBox.Toolbox.Editor
                 {
                     if (pool.FindPropertyRelative("tag").stringValue.ToLower().Contains(searchValue.ToLower()))
                     {
-                        PoolerEditor.DrawElement(pool, m_poolsList, i, labelsWidth, ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin"));
+                        PoolerEditor.DrawElement(pool, m_poolsList, i, labelsWidth, m_Skin);
                     }
                 }
                 else
                 {
-                    PoolerEditor.DrawElement(pool, m_poolsList, i, labelsWidth, ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin"));
+                    PoolerEditor.DrawElement(pool, m_poolsList, i, labelsWidth, m_Skin);
                 }
 
                 GUILayout.Space(3);
@@ -95,6 +96,7 @@ namespace VolumeBox.Toolbox.Editor
             if (EditorGUI.EndChangeCheck())
             {
                 EditorUtility.SetDirty(target);
+                PoolerTagPropertyDrawer.IsPoolsChanged = true;
             }
         }
 

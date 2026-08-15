@@ -27,7 +27,10 @@ namespace VolumeBox.Toolbox
     public class AudioClipInfo
     {
         public string id;
+#if UNITY_2023_2_OR_NEWER
+        public AudioResource clip;
+#else
         public AudioClip clip;
-        public float volume = 1;
+#endif
     }
 }

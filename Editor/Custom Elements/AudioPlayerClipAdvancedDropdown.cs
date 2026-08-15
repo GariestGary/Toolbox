@@ -1,46 +1,49 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEditor.IMGUI.Controls;
 using UnityEngine;
 
 namespace VolumeBox.Toolbox.Editor
 {
-    public class AudioPlayerClipAdvancedDropdown: AdvancedDropdown
+    public class AudioPlayerClipAdvancedDropdown : AdvancedDropdown
     {
-        private Action<string> m_OnClipSelectedCallback;
-        private Dictionary<string, string[]> m_Albums;
+        private readonly List<AudioDropdownGroup> m_Groups;
+        private readonly Action<string> m_OnClipSelectedCallback;
 
-        public AudioPlayerClipAdvancedDropdown(AdvancedDropdownState state) : base(state)
+        public AudioPlayerClipAdvancedDropdown(
+            AdvancedDropdownState state,
+            List<AudioDropdownGroup> groups,
+            Action<string> onClipSelectedCallback) : base(state)
         {
-        }
-
-        public AudioPlayerClipAdvancedDropdown(AdvancedDropdownState state, Dictionary<string, string[]> albums, Action<string> onClipSelectedCallback) : base(state)
-        {
-            m_Albums = albums;
+            m_Groups = groups;
             m_OnClipSelectedCallback = onClipSelectedCallback;
+            minimumSize = new Vector2(300f, 360f);
         }
 
         protected override AdvancedDropdownItem BuildRoot()
         {
             var root = new AdvancedDropdownItem("Audio Clips");
 
-            for (int i = 0; i < m_Albums.Keys.Count; i++)
+            foreach (var group in m_Groups)
             {
-                var album = m_Albums.ElementAt(i);
+                root.AddChild(BuildGroup(group));
+            }
 
-                if (album.Value.Length > 0)
-                {
-                    var albumRoot = new AdvancedDropdownItem(album.Key);
+            return root;
+        }
 
-                    for (int j = 0; j < album.Value.Length; j++)
-                    {
-                        albumRoot.AddChild(new AlbumAdvancedDropDownItem(album.Value[j], album.Key, album.Value[j]));
-                    }
+        private static AdvancedDropdownItem BuildGroup(AudioDropdownGroup group)
+        {
+            var root = new AdvancedDropdownItem(group.Name);
 
-                    root.AddChild(albumRoot);
-                }
+            foreach (var entry in group.Entries)
+            {
+                root.AddChild(new AudioClipDropdownItem(entry.Name, entry.FormattedId));
+            }
+
+            foreach (var child in group.Children)
+            {
+                root.AddChild(BuildGroup(child));
             }
 
             return root;
@@ -48,26 +51,51 @@ namespace VolumeBox.Toolbox.Editor
 
         protected override void ItemSelected(AdvancedDropdownItem item)
         {
-            m_OnClipSelectedCallback?.Invoke((item as AlbumAdvancedDropDownItem).AudioClipFormatted);
-        }
+            base.ItemSelected(item);
 
+            if (item is AudioClipDropdownItem clipItem)
+            {
+                m_OnClipSelectedCallback?.Invoke(clipItem.FormattedId);
+            }
+        }
     }
 
-    public class AlbumAdvancedDropDownItem: AdvancedDropdownItem
+    public class AudioDropdownGroup
     {
-        private string m_AlbumName;
-        private string m_ClipName;
+        public string Name { get; }
+        public List<AudioDropdownGroup> Children { get; }
+        public List<AudioDropdownEntry> Entries { get; }
 
-        public string AudioClipFormatted => $"{m_AlbumName}/{m_ClipName}";
-
-        public AlbumAdvancedDropDownItem(string name) : base(name)
+        public AudioDropdownGroup(
+            string name,
+            List<AudioDropdownGroup> children = null,
+            List<AudioDropdownEntry> entries = null)
         {
+            Name = name;
+            Children = children ?? new List<AudioDropdownGroup>();
+            Entries = entries ?? new List<AudioDropdownEntry>();
         }
+    }
 
-        public AlbumAdvancedDropDownItem(string name, string albumName, string clipName) : base(name)
+    public readonly struct AudioDropdownEntry
+    {
+        public string Name { get; }
+        public string FormattedId { get; }
+
+        public AudioDropdownEntry(string name, string formattedId)
         {
-            m_AlbumName = albumName;
-            m_ClipName = clipName;
+            Name = name;
+            FormattedId = formattedId;
+        }
+    }
+
+    public class AudioClipDropdownItem : AdvancedDropdownItem
+    {
+        public string FormattedId { get; }
+
+        public AudioClipDropdownItem(string name, string formattedId) : base(name)
+        {
+            FormattedId = formattedId;
         }
     }
 }

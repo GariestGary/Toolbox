@@ -1,5 +1,6 @@
 using UnityEditor;
 using UnityEditor.UIElements;
+using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace VolumeBox.Toolbox.Editor
@@ -12,6 +13,7 @@ namespace VolumeBox.Toolbox.Editor
         public void DrawTarget(MonoCached mono)
         {
             m_Target = mono;
+            rootVisualElement.Clear();
 
             var inHierarchy = new Toggle("Process If Inactive In Hierarchy");
             var self = new Toggle("Process If Inactive Self");
@@ -29,21 +31,65 @@ namespace VolumeBox.Toolbox.Editor
             rootVisualElement.Add(ignoreTimeScale);
         }
 
-        [MenuItem("CONTEXT/MonoCached/Process Settings")]
-        public static void Open(MenuCommand command)
+        public static void Open(MonoCached mono)
         {
             if(instance != null)
             {
                 instance.Close();
             }
 
-            MonoCached mono = command.context as MonoCached;
             var window = GetWindow<MonoCachedProcessSettingsEditorWindow>(mono.GetType().ToString() + " Settings");
             window.maxSize = new UnityEngine.Vector2(300, 100);
             instance = window;
             window.minSize = new UnityEngine.Vector2(300, 100);
             window.DrawTarget(mono);
             window.Show();
+        }
+
+        private void OnDisable()
+        {
+            if (instance == this)
+            {
+                instance = null;
+            }
+        }
+    }
+
+    public static class MonoCachedHeaderGUI
+    {
+        [InitializeOnLoadMethod]
+        private static void Register()
+        {
+            UnityEditor.Editor.finishedDefaultHeaderGUI -= DrawHeaderButton;
+            UnityEditor.Editor.finishedDefaultHeaderGUI += DrawHeaderButton;
+        }
+
+        private static void DrawHeaderButton(UnityEditor.Editor editor)
+        {
+            if (editor.target is not MonoCached mono)
+            {
+                return;
+            }
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Space(16f);
+
+            var icon = ToolboxEditorGUI.Icon("Settings", "⚙", "Open MonoCached process settings");
+            var content = icon.image != null
+                ? new GUIContent(" MonoCached Settings", icon.image, icon.tooltip)
+                : new GUIContent("⚙ MonoCached Settings", icon.tooltip);
+
+            if (GUILayout.Button(
+                    content,
+                    EditorStyles.miniButton,
+                    GUILayout.Width(150),
+                    GUILayout.Height(20)))
+            {
+                MonoCachedProcessSettingsEditorWindow.Open(mono);
+            }
+
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
         }
     }
 }

@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEditor.IMGUI.Controls;
 using UnityEngine;
@@ -29,28 +30,62 @@ namespace VolumeBox.Toolbox.Editor
 
             m_Property = property;
 
-            if(m_Dropdown == null)
-            {
-                m_Dropdown = new SceneAdvancedDropdown(new AdvancedDropdownState(), OnSceneSelectedCallback);
-            }
-
             EditorGUI.BeginProperty(position, GUIContent.none, property);
 
             m_Property.serializedObject.Update();
-            
-            if(!property.stringValue.IsValuable())
+
+            var scenes = BuildSettingsSceneUtils.GetScenes();
+
+            if (scenes.Count == 0)
             {
-                property.stringValue = SceneAdvancedDropdown.GetFormattedScenesList()[0];
-                m_Property.serializedObject.ApplyModifiedProperties();
+                if (GUI.Button(fieldRect, new GUIContent("No scenes in Build Settings", "Open Build Settings"), EditorStyles.miniButton))
+                {
+                    if (!EditorApplication.ExecuteMenuItem("File/Build Settings..."))
+                    {
+                        EditorApplication.ExecuteMenuItem("File/Build Profiles");
+                    }
+                }
+
+                EditorGUI.EndProperty();
+                return;
             }
 
-            if(GUI.Button(fieldRect, new GUIContent(property.stringValue), EditorStyles.popup))
+            var isValid = !property.stringValue.IsValuable() || scenes.Any(scene =>
+                scene.Value == property.stringValue || scene.Name == property.stringValue || scene.Path == property.stringValue);
+            var oldColor = GUI.backgroundColor;
+
+            if (!isValid)
             {
+                GUI.backgroundColor = new Color(1f, 0.65f, 0.35f);
+                fieldRect.width -= 24f;
+            }
+
+            var caption = property.stringValue.IsValuable() ? property.stringValue : "Select Scene";
+
+            if(GUI.Button(fieldRect, new GUIContent(caption, isValid ? "Select a scene" : "Scene is missing from Build Settings"), EditorStyles.popup))
+            {
+                m_Dropdown = new SceneAdvancedDropdown(new AdvancedDropdownState(), OnSceneSelectedCallback);
                 m_Dropdown.Show(fieldRect);
             }
 
-            if(EditorGUI.EndChangeCheck())
+            GUI.backgroundColor = oldColor;
+
+            if (!isValid)
             {
+                var buildSettingsRect = fieldRect;
+                buildSettingsRect.x += fieldRect.width + 2f;
+                buildSettingsRect.width = 22f;
+
+                if (GUI.Button(
+                        buildSettingsRect,
+                        ToolboxEditorGUI.Icon("SceneAsset Icon", "!", "Scene is missing. Open Build Settings"),
+                        EditorStyles.miniButton))
+                {
+                    if (!EditorApplication.ExecuteMenuItem("File/Build Settings..."))
+                    {
+                        EditorApplication.ExecuteMenuItem("File/Build Profiles");
+                    }
+                }
             }
 
             EditorGUI.EndProperty();

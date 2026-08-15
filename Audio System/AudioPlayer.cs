@@ -23,23 +23,11 @@ namespace VolumeBox.Toolbox
             msg.Subscribe<StopAllAudioMessage>(_ => StopAll());
 
             _Data = ResourcesUtils.ResolveScriptable<AudioPlayerDataHolder>(SettingsData.audioPlayerResourcesDataPath);
+            _AlbumControllers = new List<AudioAlbumController>();
             
             foreach (var album in _Data.Albums)
             {
-                var controller = new AudioAlbumController(album);
-                _AlbumControllers.Add(controller);
-                
-                if(album.useSeparateSource)
-                {
-                    var newSourceObj = new GameObject($"{album.albumName} Audio Source");
-                    newSourceObj.transform.SetParent(audioSourcesRoot);
-                    album.source = newSourceObj.AddComponent<AudioSource>();
-                    album.source.outputAudioMixerGroup = album.mixerGroup;
-                }
-                else
-                {
-                    album.source = defaultAudioSource;
-                }
+                RegisterAlbum(album);
             }
         }
 
@@ -50,11 +38,14 @@ namespace VolumeBox.Toolbox
 
         public AudioAlbumController Play(string source, string id, float volume = -1, float pitch = 1, bool loop = false, PlayType playType = PlayType.ONE_SHOT)
         {
-            var controller = GetAlbumController(source);
+            var controller = GetAlbumController(source, id);
 
             if(controller == null)
             {
-                Debug.LogWarning($"Album named '{source}' not found");
+                var albumExists = _AlbumControllers.Any(album => album.AlbumName == source);
+                Debug.LogWarning(albumExists
+                    ? $"Clip with ID '{id}' was not found in albums named '{source}'"
+                    : $"Album named '{source}' not found");
                 return null;
             }
             
@@ -101,6 +92,80 @@ namespace VolumeBox.Toolbox
             controller.Play(clip, volume, pitch, loop, playType);
         }
 
+#if UNITY_2023_2_OR_NEWER
+        public void Play(string source, AudioResource resource, float volume = -1, float pitch = 1, bool loop = false, PlayType playType = PlayType.ONE_SHOT)
+        {
+            var controller = GetAlbumController(source);
+
+            if (controller == null || resource == null) return;
+
+            controller.Play(resource, volume, pitch, loop, playType);
+        }
+#endif
+
+#if UNITY_2023_2_OR_NEWER
+        public static void Play(AudioSource source, AudioClip clip, float volume = 1, float pitch = 1, bool loop = false, PlayType playType = PlayType.ONE_SHOT)
+        {
+            Play(source, (AudioResource)clip, volume, pitch, loop, playType);
+        }
+
+        public static void Play(AudioSource source, AudioResource resource, float volume = 1, float pitch = 1, bool loop = false, PlayType playType = PlayType.ONE_SHOT)
+        {
+            if (source == null || resource == null)
+            {
+                return;
+            }
+
+            source.loop = loop;
+            source.resource = resource;
+            source.volume = volume;
+            source.pitch = pitch;
+
+            switch (playType)
+            {
+                case PlayType.STOP_THEN_PLAY:
+                    source.Stop();
+                    source.Play();
+                    break;
+
+                case PlayType.PLAY_DEFAULT:
+                    source.Play();
+                    break;
+
+                case PlayType.ONE_SHOT:
+                    if (resource is AudioClip clip)
+                    {
+                        source.PlayOneShot(clip, volume);
+                    }
+                    else
+                    {
+                        source.Play();
+                    }
+                    break;
+
+                case PlayType.NO_INTERRUPT:
+                    if (source.isPlaying)
+                    {
+                        return;
+                    }
+
+                    source.Stop();
+                    source.Play();
+                    break;
+
+                default:
+                    if (resource is AudioClip defaultClip)
+                    {
+                        source.PlayOneShot(defaultClip, volume);
+                    }
+                    else
+                    {
+                        source.Play();
+                    }
+                    break;
+            }
+        }
+#else
         public static void Play(AudioSource source, AudioClip clip, float volume = 1, float pitch = 1, bool loop = false, PlayType playType = PlayType.ONE_SHOT)
         {
             if (source == null || clip == null)
@@ -143,6 +208,7 @@ namespace VolumeBox.Toolbox
                     break;
             }
         }
+#endif
 
         public void StopAudio(string source)
         {
@@ -170,7 +236,28 @@ namespace VolumeBox.Toolbox
 
         public AudioAlbumController GetAlbumController(string albumName)
         {
-            return _AlbumControllers.FirstOrDefault(a => a.AlbumName == albumName);
+            var matchingAlbums = _AlbumControllers.Where(album => album.AlbumName == albumName).ToArray();
+
+            return matchingAlbums.Length switch
+            {
+                0 => null,
+                1 => matchingAlbums[0],
+                _ => matchingAlbums[UnityEngine.Random.Range(0, matchingAlbums.Length)]
+            };
+        }
+
+        private AudioAlbumController GetAlbumController(string albumName, string clipId)
+        {
+            var matchingAlbums = _AlbumControllers
+                .Where(album => album.AlbumName == albumName && album.GetClip(clipId) != null)
+                .ToArray();
+
+            return matchingAlbums.Length switch
+            {
+                0 => null,
+                1 => matchingAlbums[0],
+                _ => matchingAlbums[UnityEngine.Random.Range(0, matchingAlbums.Length)]
+            };
         }
 
         /// <summary>
@@ -178,7 +265,13 @@ namespace VolumeBox.Toolbox
         /// </summary>
         public void AddAlbum(AudioAlbum album)
         {
+            if (album == null || _AlbumControllers.Any(controller => controller.Album == album))
+            {
+                return;
+            }
+
             _Data.Albums.Add(album);
+            RegisterAlbum(album);
         }
 
         /// <summary>
@@ -186,16 +279,26 @@ namespace VolumeBox.Toolbox
         /// </summary>
         public void AddAlbum(string albumName, AudioSource defaultSource, AudioMixerGroup mixerGroup = null, AudioSource source = null)
         {
-            _Data.Albums.Add(new AudioAlbum()
+            var album = new AudioAlbum()
             {
                 albumName = albumName,
                 mixerGroup = mixerGroup,
-                source = source == null ? defaultSource : source
-            });
+                source = source == null ? defaultSource : source,
+                clips = new List<AudioClipInfo>()
+            };
+
+            AddAlbum(album);
         }
 
         public void AddClipToAlbum(string clipID, string albumName, AudioClip clip)
         {
+#if UNITY_2023_2_OR_NEWER
+            AddClipToAlbum(clipID, albumName, (AudioResource)clip);
+        }
+
+        public void AddClipToAlbum(string clipID, string albumName, AudioResource resource)
+        {
+#endif
             var controller = GetAlbumController(albumName);
 
             if (controller == null)
@@ -206,7 +309,11 @@ namespace VolumeBox.Toolbox
             
             controller.AddClip(new AudioClipInfo()
             {
+#if UNITY_2023_2_OR_NEWER
+                clip = resource, id = clipID
+#else
                 clip = clip, id =  clipID
+#endif
             });
         }
 
@@ -217,11 +324,40 @@ namespace VolumeBox.Toolbox
         {
             if(_Data.Albums.Contains(album))
             {
+                var controller = _AlbumControllers.FirstOrDefault(item => item.Album == album);
+                controller?.Stop();
+                _AlbumControllers.Remove(controller);
+
+                if (album.useSeparateSource && album.source != null && album.source != defaultAudioSource)
+                {
+                    Destroy(album.source.gameObject);
+                }
+
+                album.source = null;
                 _Data.Albums.Remove(album);
                 return true;
             }
 
             return false;
+        }
+
+        private void RegisterAlbum(AudioAlbum album)
+        {
+            album.clips ??= new List<AudioClipInfo>();
+
+            if (album.useSeparateSource)
+            {
+                var newSourceObj = new GameObject($"{album.albumName} Audio Source");
+                newSourceObj.transform.SetParent(audioSourcesRoot);
+                album.source = newSourceObj.AddComponent<AudioSource>();
+                album.source.outputAudioMixerGroup = album.mixerGroup;
+            }
+            else
+            {
+                album.source = defaultAudioSource;
+            }
+
+            _AlbumControllers.Add(new AudioAlbumController(album));
         }
     }
     

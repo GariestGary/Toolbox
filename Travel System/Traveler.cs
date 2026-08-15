@@ -81,7 +81,7 @@ namespace VolumeBox.Toolbox
         /// </summary>
         public bool IsSceneOpened(string sceneName)
         {
-            return _openedScenes.Any(s => s.SceneDefinition.name == sceneName);
+            return _openedScenes.Any(scene => MatchesScene(scene.SceneDefinition, sceneName));
         }
 
         public async UniTask LoadScene(string sceneName, SceneArgs args = null)
@@ -116,7 +116,12 @@ namespace VolumeBox.Toolbox
             _currentLoadingSceneOperation = loadingOperation;
             await loadingOperation;
             _Msg.Send(new SceneLoadedMessage(sceneName));
-            var sceneDefinition = SceneManager.GetSceneByName(sceneName);
+            var sceneDefinition = SceneManager.GetSceneByPath(sceneName);
+
+            if (!sceneDefinition.IsValid())
+            {
+                sceneDefinition = SceneManager.GetSceneByName(System.IO.Path.GetFileNameWithoutExtension(sceneName));
+            }
             await UniTask.DelayFrame(1);
             var sceneObjects = sceneDefinition.GetRootGameObjects();
 
@@ -163,7 +168,7 @@ namespace VolumeBox.Toolbox
         /// <param name="sceneName">scene name other than empty string</param>
         public async UniTask UnloadScene(string sceneName)
         {
-            OpenedScene sceneToUnload = _openedScenes.FirstOrDefault(x => x.SceneDefinition.name == sceneName);
+            OpenedScene sceneToUnload = _openedScenes.FirstOrDefault(scene => MatchesScene(scene.SceneDefinition, sceneName));
 
             if (sceneToUnload == null)
             {
@@ -182,7 +187,7 @@ namespace VolumeBox.Toolbox
 
             _Upd.RemoveObjectsFromUpdate(sceneToUnload.SceneDefinition.GetRootGameObjects());
 
-            _currentUnloadingSceneOperation = SceneManager.UnloadSceneAsync(sceneName);
+            _currentUnloadingSceneOperation = SceneManager.UnloadSceneAsync(sceneToUnload.SceneDefinition);
             await _currentUnloadingSceneOperation;
 
             _currentUnloadingSceneOperation = null;
@@ -222,11 +227,18 @@ namespace VolumeBox.Toolbox
                 var lastSlash = scenePath.LastIndexOf("/");
                 var sceneName = scenePath.Substring(lastSlash + 1, scenePath.LastIndexOf(".") - lastSlash - 1);
 
-                if (string.Compare(name, sceneName, true) == 0)
+                if (string.Equals(name, sceneName, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(name, scenePath, StringComparison.OrdinalIgnoreCase))
                     return true;
             }
 
             return false;
+        }
+
+        private static bool MatchesScene(Scene scene, string identifier)
+        {
+            return string.Equals(scene.name, identifier, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(scene.path, identifier, StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>

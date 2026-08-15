@@ -2,6 +2,9 @@
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+#if UNITY_2023_2_OR_NEWER
+using UnityEngine.Audio;
+#endif
 
 namespace VolumeBox.Toolbox.Editor
 {
@@ -20,6 +23,7 @@ namespace VolumeBox.Toolbox.Editor
         private void OnEnable()
         {
             m_albums = serializedObject.FindProperty("albums");
+            m_Skin = ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin");
         }
 
         public void DrawIMGUI()
@@ -27,85 +31,7 @@ namespace VolumeBox.Toolbox.Editor
             serializedObject.Update();
 
             EditorGUI.BeginChangeCheck();
-            GUILayout.BeginHorizontal(GUI.skin.FindStyle("Toolbar"));
-            albumSearchValue = GUILayout.TextField(albumSearchValue, GUI.skin.FindStyle("ToolbarSearchTextField"));
-            if (GUILayout.Button("", GUI.skin.FindStyle("ToolbarSearchCancelButton")))
-            {
-                albumSearchValue = "";
-                GUI.FocusControl(null);
-            }
-
-            if (GUILayout.Button("Add Album", GUILayout.Width(80), GUILayout.ExpandHeight(true)))
-            {
-                if(m_albums.arraySize <= 0)
-                {
-                    m_albums.InsertArrayElementAtIndex(0);
-                }
-                else
-                {
-                    m_albums.InsertArrayElementAtIndex(m_albums.arraySize - 1);
-                }
-
-                m_albums.GetArrayElementAtIndex(m_albums.arraySize - 1).FindPropertyRelative("albumName").stringValue = string.Empty;
-                currentScrollPosition.y = float.MaxValue;
-
-                AudioPlayerClipPropertyDrawer.IsClipsChanged = true;
-            }
-
-            if(GUILayout.Button(EditorGUIUtility.IconContent("d_PreMatQuad"), GUILayout.Width(20), GUILayout.ExpandHeight(true)))
-            {
-                AudioUtils.StopAllPreviewClips();
-            }
-
-            GUILayout.EndHorizontal();
-            EditorGUILayout.Space(3);
-            EditorGUILayout.BeginHorizontal();
-
-
-            if(m_albums.arraySize > 0)
-            {
-                EditorGUILayout.LabelField("Albums:", ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin").GetStyle("Label"));
-                
-                if (GUILayout.Button("Expand All"))
-                {
-                    SetExpandedStateForAll(true);
-                }
-
-                if (GUILayout.Button("Collapse All"))
-                {
-                    SetExpandedStateForAll(false);
-                }
-            }
-
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.BeginVertical();
-            currentScrollPosition = EditorGUILayout.BeginScrollView(currentScrollPosition);
-
-            GUILayout.Space(5);
-
-            for (int i = 0; i < m_albums.arraySize; i++)
-            {
-                var album = m_albums.GetArrayElementAtIndex(i);
-
-                if(albumSearchValue.IsValuable())
-                {
-                    if(album.FindPropertyRelative("albumName").stringValue.ToLower().Contains(albumSearchValue.ToLower()))
-                    {
-                        DrawAlbum(album, m_albums, i, ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin"), RedButtonColor, LabelSize, false);
-                    }
-                }
-                else
-                {
-                    DrawAlbum(album, m_albums, i, ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin"), RedButtonColor, LabelSize, false);
-                }
-                GUILayout.Space(3);
-            }
-
-            EditorGUILayout.EndVertical();
-
-
-            EditorGUILayout.EndScrollView();
+            DrawAlbums(m_albums, ref albumSearchValue, ref currentScrollPosition, m_Skin, false);
 
             serializedObject.ApplyModifiedProperties();
 
@@ -115,11 +41,104 @@ namespace VolumeBox.Toolbox.Editor
             }
         }
 
-        private void SetExpandedStateForAll(bool value)
+        public static void DrawAlbums(
+            SerializedProperty albums,
+            ref string searchValue,
+            ref Vector2 scrollPosition,
+            GUISkin skin,
+            bool isComponent)
         {
-            for (int i = 0; i < m_albums.arraySize; i++)
+            GUILayout.BeginHorizontal(GUI.skin.FindStyle("Toolbar"));
+            searchValue = GUILayout.TextField(searchValue, GUI.skin.FindStyle("ToolbarSearchTextField"));
+            if (GUILayout.Button("", GUI.skin.FindStyle("ToolbarSearchCancelButton")))
             {
-                var album = m_albums.GetArrayElementAtIndex(i);
+                searchValue = "";
+                GUI.FocusControl(null);
+            }
+
+            if (GUILayout.Button("Add Album", GUILayout.Width(80), GUILayout.ExpandHeight(true)))
+            {
+                AddAlbum(albums);
+                scrollPosition.y = float.MaxValue;
+                AudioPlayerClipPropertyDrawer.IsClipsChanged = true;
+            }
+
+            if(GUILayout.Button(ToolboxEditorGUI.Icon("PreMatQuad", "■", "Stop all audio previews"), GUILayout.Width(24), GUILayout.ExpandHeight(true)))
+            {
+                AudioUtils.StopAllPreviewClips();
+            }
+
+            GUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(3);
+            EditorGUILayout.BeginHorizontal();
+
+
+            if(albums.arraySize > 0)
+            {
+                EditorGUILayout.LabelField("Albums:", skin.GetStyle("Label"));
+                
+                if (GUILayout.Button("Expand All"))
+                {
+                    SetExpandedStateForAll(albums, true);
+                }
+
+                if (GUILayout.Button("Collapse All"))
+                {
+                    SetExpandedStateForAll(albums, false);
+                }
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginVertical();
+            scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
+
+            GUILayout.Space(5);
+
+            for (int i = 0; i < albums.arraySize; i++)
+            {
+                var album = albums.GetArrayElementAtIndex(i);
+
+                if(searchValue.IsValuable())
+                {
+                    if(album.FindPropertyRelative("albumName").stringValue.IndexOf(searchValue, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        DrawAlbum(album, albums, i, skin, RedButtonColor, LabelSize, isComponent);
+                    }
+                }
+                else
+                {
+                    DrawAlbum(album, albums, i, skin, RedButtonColor, LabelSize, isComponent);
+                }
+                GUILayout.Space(3);
+            }
+
+            EditorGUILayout.EndVertical();
+
+
+            EditorGUILayout.EndScrollView();
+
+        }
+
+        private static void AddAlbum(SerializedProperty albums)
+        {
+            var index = albums.arraySize;
+            albums.arraySize++;
+            var album = albums.GetArrayElementAtIndex(index);
+            album.isExpanded = false;
+            album.FindPropertyRelative("albumName").stringValue = string.Empty;
+            album.FindPropertyRelative("source").objectReferenceValue = null;
+            album.FindPropertyRelative("useSeparateSource").boolValue = false;
+            album.FindPropertyRelative("mixerGroup").objectReferenceValue = null;
+            album.FindPropertyRelative("clips").arraySize = 0;
+        }
+
+        private static void SetExpandedStateForAll(SerializedProperty albums, bool value)
+        {
+            for (int i = 0; i < albums.arraySize; i++)
+            {
+                var album = albums.GetArrayElementAtIndex(i);
                 album.isExpanded = value;
             }
         }
@@ -137,6 +156,7 @@ namespace VolumeBox.Toolbox.Editor
             EditorGUILayout.BeginHorizontal(GUILayout.Height(25));
 
             GUILayout.Space(5);
+            ToolboxEditorGUI.ArrayDragHandle(list, index);
             var albumName = property.FindPropertyRelative("albumName");
             
             EditorGUILayout.BeginVertical();
@@ -148,7 +168,7 @@ namespace VolumeBox.Toolbox.Editor
             var oldColor = GUI.backgroundColor;
             GUI.backgroundColor = removeButtonColor;
 
-            if (GUILayout.Button(EditorGUIUtility.IconContent("TreeEditor.Trash"), GUILayout.Width(25), GUILayout.ExpandHeight(true)))
+            if (GUILayout.Button(ToolboxEditorGUI.Icon("TreeEditor.Trash", "×", "Delete album"), GUILayout.Width(25), GUILayout.ExpandHeight(true)))
             {
                 if(EditorUtility.DisplayDialog("Confirm delete", $"Are you sure want to delete {albumName.stringValue} album?", "Yes", "Cancel"))
                 {
@@ -202,11 +222,12 @@ namespace VolumeBox.Toolbox.Editor
 
                 if (GUILayout.Button("Add Clip", GUILayout.Width(75)))
                 {
-                    m_clips.InsertArrayElementAtIndex(0);
-                    var newClip = m_clips.GetArrayElementAtIndex(0);
+                    var newIndex = m_clips.arraySize;
+                    m_clips.arraySize++;
+                    var newClip = m_clips.GetArrayElementAtIndex(newIndex);
                     newClip.isExpanded = false;
                     newClip.FindPropertyRelative("id").stringValue = string.Empty;
-                    newClip.FindPropertyRelative("volume").floatValue = 1;
+                    newClip.FindPropertyRelative("clip").objectReferenceValue = null;
                     AudioPlayerClipPropertyDrawer.IsClipsChanged = true;
                 }
 
@@ -293,6 +314,8 @@ namespace VolumeBox.Toolbox.Editor
             GUILayout.Space(3);
             EditorGUILayout.BeginHorizontal(GUILayout.Height(25));
             GUILayout.Space(3);
+            ToolboxEditorGUI.ArrayDragHandle(list, index);
+            GUILayout.Space(6);
             var clipId = property.FindPropertyRelative("id");
             EditorGUILayout.BeginVertical();
             GUILayout.FlexibleSpace();
@@ -300,38 +323,41 @@ namespace VolumeBox.Toolbox.Editor
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndVertical();
             var clip = property.FindPropertyRelative("clip");
-            var volume = property.FindPropertyRelative("volume");
+#if UNITY_2023_2_OR_NEWER
+            var clipValue = clip.objectReferenceValue as AudioResource;
+            var isRandomContainer = clipValue != null && clipValue.GetType().FullName == "UnityEngine.Audio.AudioRandomContainer";
+#else
             var clipValue = clip.objectReferenceValue as AudioClip;
+            const bool isRandomContainer = false;
+#endif
 
-            if (GUILayout.Button(EditorGUIUtility.IconContent("PlayButton On"), GUILayout.Width(25), GUILayout.ExpandHeight(true)))
+            if (isRandomContainer)
             {
-                if(Toolbox.HasInstance)
+                if (GUILayout.Button(new GUIContent("Open Container", "Open Audio Random Container editor"), GUILayout.Width(110), GUILayout.ExpandHeight(true)))
+                {
+                    AssetDatabase.OpenAsset(clip.objectReferenceValue);
+                }
+            }
+            else
+            {
+                if (GUILayout.Button(ToolboxEditorGUI.Icon("PlayButton", "▶", "Play audio preview"), GUILayout.Width(25), GUILayout.ExpandHeight(true)))
                 {
                     if (clipValue != null)
                     {
-                        Toolbox.AudioPlayer.DefaultAudioSource.Stop();
-                        var prevVolume = Toolbox.AudioPlayer.DefaultAudioSource.volume;
-                        Toolbox.AudioPlayer.DefaultAudioSource.volume = volume.floatValue;
-                        Toolbox.AudioPlayer.DefaultAudioSource.PlayOneShot(clipValue);
+                        AudioUtils.PlayPreviewClip(clipValue);
                     }
                 }
-                else
+
+                if (GUILayout.Button(ToolboxEditorGUI.Icon("PreMatQuad", "■", "Stop audio preview"), GUILayout.Width(25), GUILayout.ExpandHeight(true)))
                 {
-                    EditorUtility.DisplayDialog("AudioPlayer missing!", "AudioPlayer instance needed for clips preview doesn't exist among currently opened scenes. You can open MAIN scene from 'Toolbox/Open MAIN Scene' that already has AudioPlayer", "OK");
+                    AudioUtils.StopAllPreviewClips();
                 }
-
-
-            }
-
-            if (GUILayout.Button(EditorGUIUtility.IconContent("d_PreMatQuad"), GUILayout.Width(25), GUILayout.ExpandHeight(true)))
-            {
-                AudioUtils.StopAllPreviewClips();
             }
 
             var oldColor = GUI.backgroundColor;
             GUI.backgroundColor = removeButtonColor;
 
-            if (GUILayout.Button(EditorGUIUtility.IconContent("TreeEditor.Trash"), GUILayout.Width(25), GUILayout.ExpandHeight(true)))
+            if (GUILayout.Button(ToolboxEditorGUI.Icon("TreeEditor.Trash", "×", "Delete clip"), GUILayout.Width(25), GUILayout.ExpandHeight(true)))
             {
                 GUI.backgroundColor = oldColor;
                 list.DeleteArrayElementAtIndex(index);
@@ -378,13 +404,12 @@ namespace VolumeBox.Toolbox.Editor
 
                 //clip reference draw
                 EditorGUILayout.BeginHorizontal();
+#if UNITY_2023_2_OR_NEWER
+                EditorGUILayout.LabelField("Audio Resource", GUILayout.Width(labelSize));
+#else
                 EditorGUILayout.LabelField("Audio Clip", GUILayout.Width(labelSize));
+#endif
                 EditorGUILayout.PropertyField(clip, GUIContent.none);
-                EditorGUILayout.EndHorizontal();
-
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField("Clip Volume", GUILayout.Width(labelSize));
-                volume.floatValue = EditorGUILayout.Slider(volume.floatValue, 0, 1);
                 EditorGUILayout.EndHorizontal();
 
                 EditorGUILayout.EndVertical();
@@ -394,9 +419,13 @@ namespace VolumeBox.Toolbox.Editor
 
                 EditorGUILayout.EndVertical();
 
-                var previewSize = 75;
-                var preview = AssetPreview.GetAssetPreview(clip.objectReferenceValue);
-                GUILayout.Label(preview, GUILayout.Width(previewSize), GUILayout.Height(previewSize));
+                if (!isRandomContainer)
+                {
+                    var previewWidth = 75f;
+                    var previewHeight = EditorGUIUtility.singleLineHeight * 2f + EditorGUIUtility.standardVerticalSpacing;
+                    var preview = AssetPreview.GetAssetPreview(clip.objectReferenceValue);
+                    GUILayout.Label(preview, GUILayout.Width(previewWidth), GUILayout.Height(previewHeight));
+                }
 
                 EditorGUILayout.EndHorizontal();
             }

@@ -1,8 +1,10 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using UnityEditor;
-using UnityEditor.Presets;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace VolumeBox.Toolbox.Editor
 {
@@ -15,7 +17,16 @@ namespace VolumeBox.Toolbox.Editor
         private List<PoolDropdownGroup> m_ScenePoolGroups;
         private bool m_ManualEnabled = false;
 
+        private static List<PoolDropdownGroup> s_ScenePoolGroups;
+
         public static bool IsPoolsChanged { get; set; }
+
+        static PoolerTagPropertyDrawer()
+        {
+            EditorBuildSettings.sceneListChanged += InvalidateScenePoolCache;
+            EditorApplication.hierarchyChanged += InvalidateScenePoolCache;
+            EditorApplication.projectChanged += InvalidateScenePoolCache;
+        }
 
         public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
         {
@@ -57,7 +68,12 @@ namespace VolumeBox.Toolbox.Editor
             poolRect.x += poolRect.width;
             poolRect.width = 20;
 
-            m_ManualEnabled = GUI.Toggle(poolRect, m_ManualEnabled, EditorGUIUtility.IconContent("d_editicon.sml"), "Button");
+            m_ManualEnabled = GUI.Toggle(
+                poolRect,
+                m_ManualEnabled,
+                ToolboxEditorGUI.Icon("editicon.sml", "✎", "Toggle manual pool ID editing"),
+                "Button"
+            );
 
             EditorGUI.EndProperty();
             EditorGUI.EndChangeCheck();
@@ -72,15 +88,13 @@ namespace VolumeBox.Toolbox.Editor
 
             m_PoolerEntries = GetPoolerEntries(m_DataHolder);
 
-            if(property.GetValue() is Component)
+            if (s_ScenePoolGroups == null || IsPoolsChanged)
             {
-                var gameObject = (property.GetValue() as Component).gameObject;
-                m_ScenePoolGroups = GetScenePoolGroups(gameObject);
+                s_ScenePoolGroups = GetScenePoolGroups();
+                IsPoolsChanged = false;
             }
-            else
-            {
-                m_ScenePoolGroups = new List<PoolDropdownGroup>();
-            }
+
+            m_ScenePoolGroups = s_ScenePoolGroups;
         }
 
         private void UpdateDropdown(SerializedProperty property)
@@ -116,28 +130,55 @@ namespace VolumeBox.Toolbox.Editor
             return entries;
         }
 
-        private List<PoolDropdownGroup> GetScenePoolGroups(GameObject sceneObject)
+        private static void InvalidateScenePoolCache()
         {
-            var scenePools = Resources.FindObjectsOfTypeAll<ScenePool>()
-                .Where(x => x.gameObject.scene == sceneObject.scene)
-                .OrderBy(x => x.Name)
-                .ToArray();
+            s_ScenePoolGroups = null;
+        }
 
+        private List<PoolDropdownGroup> GetScenePoolGroups()
+        {
             var groups = new List<PoolDropdownGroup>();
 
-            for (int i = 0; i < scenePools.Length; i++)
+            foreach (var buildScene in BuildSettingsSceneUtils.GetScenes())
             {
-                var entries = scenePools[i].Pools
-                    .Select(pool => pool.tag)
-                    .Where(tag => tag.IsValuable())
-                    .ToArray();
+                var scene = SceneManager.GetSceneByPath(buildScene.Path);
+                var isPreviewScene = !scene.IsValid() || !scene.isLoaded;
 
-                if (entries.Length > 0)
+                if (isPreviewScene)
                 {
-                    var groupName = scenePools[i].Name.IsValuable()
-                        ? scenePools[i].Name
-                        : scenePools[i].gameObject.name;
-                    groups.Add(new PoolDropdownGroup(groupName, entries));
+                    scene = EditorSceneManager.OpenPreviewScene(buildScene.Path);
+                }
+
+                try
+                {
+                    var scenePoolGroups = scene.GetRootGameObjects()
+                        .SelectMany(root => root.GetComponentsInChildren<ScenePool>(true))
+                        .Where(scenePool => scenePool.Pools != null)
+                        .Select(scenePool => new PoolDropdownGroup(
+                            scenePool.Name.IsValuable() ? scenePool.Name : scenePool.gameObject.name,
+                            scenePool.Pools
+                                .Where(pool => pool != null && pool.tag.IsValuable())
+                                .Select(pool => pool.tag)
+                                .Distinct()
+                                .ToArray()
+                        ))
+                        .Where(group => group.Entries.Length > 0)
+                        .ToList();
+
+                    if (scenePoolGroups.Count > 0)
+                    {
+                        groups.Add(new PoolDropdownGroup(
+                            buildScene.DisplayName,
+                            children: scenePoolGroups
+                        ));
+                    }
+                }
+                finally
+                {
+                    if (isPreviewScene && scene.IsValid())
+                    {
+                        EditorSceneManager.ClosePreviewScene(scene);
+                    }
                 }
             }
 

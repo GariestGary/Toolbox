@@ -3,6 +3,9 @@ using System;
 using System.Reflection;
 using UnityEditor;
 using UnityEngine;
+#if UNITY_2023_2_OR_NEWER
+using UnityEngine.Audio;
+#endif
 
 namespace VolumeBox.Toolbox.Editor
 {
@@ -31,6 +34,11 @@ namespace VolumeBox.Toolbox.Editor
 
         public static void PlayPreviewClip(AudioClip clip)
         {
+            if (clip == null)
+            {
+                return;
+            }
+
             ValidateMethods();
 
             m_PlayMethod.Invoke(
@@ -43,6 +51,56 @@ namespace VolumeBox.Toolbox.Editor
                 }
             );
         }
+
+#if UNITY_2023_2_OR_NEWER
+        public static void PlayPreviewClip(AudioResource resource)
+        {
+            if (resource is AudioClip clip)
+            {
+                PlayPreviewClip(clip);
+                return;
+            }
+
+            var resourceType = resource.GetType();
+
+            if (resourceType.FullName != "UnityEngine.Audio.AudioRandomContainer")
+            {
+                return;
+            }
+
+            var elementsProperty = resourceType.GetProperty(
+                "elements",
+                BindingFlags.Instance | BindingFlags.NonPublic
+            );
+            var elements = elementsProperty?.GetValue(resource) as Array;
+
+            if (elements == null || elements.Length == 0)
+            {
+                return;
+            }
+
+            var elementType = elements.GetType().GetElementType();
+            var clipProperty = elementType?.GetProperty("audioClip", BindingFlags.Instance | BindingFlags.NonPublic);
+            var enabledProperty = elementType?.GetProperty("enabled", BindingFlags.Instance | BindingFlags.NonPublic);
+            var availableClips = new System.Collections.Generic.List<AudioClip>();
+
+            foreach (var element in elements)
+            {
+                var isEnabled = enabledProperty == null || (bool)enabledProperty.GetValue(element);
+                var elementClip = clipProperty?.GetValue(element) as AudioClip;
+
+                if (isEnabled && elementClip != null)
+                {
+                    availableClips.Add(elementClip);
+                }
+            }
+
+            if (availableClips.Count > 0)
+            {
+                PlayPreviewClip(availableClips[UnityEngine.Random.Range(0, availableClips.Count)]);
+            }
+        }
+#endif
 
         public static void StopAllPreviewClips()
         {

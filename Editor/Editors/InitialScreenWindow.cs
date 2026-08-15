@@ -68,8 +68,6 @@ namespace VolumeBox.Toolbox.Editor
 
             if (!EditorLoadUtils.IsMainSceneCorrectInBuild())
             {
-                Debug.LogError("There's an issue with MAIN scene, please open Toolbox Setup window to fix this");
-
                 EditorGUILayout.HelpBox("MAIN scene is not in build setting or it's index not 0. You can fix this by pressing button below. It may take a while", MessageType.Error);
 
                 if (GUILayout.Button(new GUIContent("Initialize MAIN Scene", EditorGUIUtility.IconContent("d_SceneAsset Icon").image), buttonStyle, GUILayout.Height(45)))

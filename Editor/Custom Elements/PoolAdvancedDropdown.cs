@@ -44,15 +44,25 @@ namespace VolumeBox.Toolbox.Editor
 
             for (int i = 0; i < m_ScenePoolGroups.Count; i++)
             {
-                var scenePoolRoot = new AdvancedDropdownItem(m_ScenePoolGroups[i].Name);
+                root.AddChild(BuildGroup(m_ScenePoolGroups[i]));
+            }
 
-                for (int j = 0; j < m_ScenePoolGroups[i].Entries.Length; j++)
-                {
-                    var poolName = m_ScenePoolGroups[i].Entries[j];
-                    scenePoolRoot.AddChild(new PoolAdvancedDropdownItem(poolName, poolName));
-                }
+            return root;
+        }
 
-                root.AddChild(scenePoolRoot);
+        private static AdvancedDropdownItem BuildGroup(PoolDropdownGroup group)
+        {
+            var root = new AdvancedDropdownItem(group.Name);
+
+            for (int i = 0; i < group.Entries.Length; i++)
+            {
+                var poolName = group.Entries[i];
+                root.AddChild(new PoolAdvancedDropdownItem(poolName, poolName));
+            }
+
+            for (int i = 0; i < group.Children.Count; i++)
+            {
+                root.AddChild(BuildGroup(group.Children[i]));
             }
 
             return root;
@@ -74,11 +84,13 @@ namespace VolumeBox.Toolbox.Editor
     {
         public string Name { get; }
         public string[] Entries { get; }
+        public List<PoolDropdownGroup> Children { get; }
 
-        public PoolDropdownGroup(string name, string[] entries)
+        public PoolDropdownGroup(string name, string[] entries = null, List<PoolDropdownGroup> children = null)
         {
             Name = name;
-            Entries = entries;
+            Entries = entries ?? Array.Empty<string>();
+            Children = children ?? new List<PoolDropdownGroup>();
         }
     }
 

@@ -1,216 +1,209 @@
-using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
+using UnityEditor.IMGUI.Controls;
+using UnityEditor.SceneManagement;
 using UnityEngine;
-using UnityEngine.UIElements;
+using UnityEngine.SceneManagement;
 
 namespace VolumeBox.Toolbox.Editor
 {
     [CustomPropertyDrawer(typeof(AudioPlayerClipAttribute))]
     public class AudioPlayerClipPropertyDrawer : PropertyDrawer
     {
+        private AudioPlayerDataHolder m_AudioPlayerDataHolder;
+        private List<AudioDropdownGroup> m_Groups = new();
+        private bool m_ManualEnabled;
+
+        private static List<AudioDropdownGroup> s_SceneGroups;
+
         public static bool IsClipsChanged { get; set; }
 
-        private AudioPlayerDataHolder m_AudioPlayerDataHolder;
-        private Dictionary<string, string[]> m_AlbumClipsRelations;
-        private string[] m_Albums;
-        private AudioPlayerClipAdvancedDropdown m_Dropdown;
-        private bool m_ManualEnabled;
+        static AudioPlayerClipPropertyDrawer()
+        {
+            EditorBuildSettings.sceneListChanged += InvalidateSceneCache;
+            EditorApplication.hierarchyChanged += InvalidateSceneCache;
+            EditorApplication.projectChanged += InvalidateSceneCache;
+        }
 
         public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
         {
-            ValidateClips(property);
-            
+            if (property.propertyType != SerializedPropertyType.String)
+            {
+                EditorGUI.LabelField(position, label.text, "AudioPlayerClip requires a string field");
+                return;
+            }
+
+            ValidateEntries();
+            EditorGUI.BeginProperty(position, label, property);
+
             var labelRect = position;
             labelRect.width = EditorGUIUtility.labelWidth;
             EditorGUI.LabelField(labelRect, label);
 
-            var dropdownRect = position;
-            dropdownRect.x += labelRect.width + 2;
-            dropdownRect.width -= labelRect.width + 22;
-            
-            if(m_Albums.Length <= 0 && !m_ManualEnabled && !property.stringValue.IsValuable())
+            var fieldRect = position;
+            fieldRect.x += labelRect.width + 2;
+            fieldRect.width -= labelRect.width + 24;
+
+            if (m_ManualEnabled)
             {
-                EditorGUI.LabelField(dropdownRect, "There is no albums", EditorStyles.popup);
+                property.stringValue = EditorGUI.TextField(fieldRect, property.stringValue);
+            }
+            else if (m_Groups.Count == 0)
+            {
+                EditorGUI.LabelField(fieldRect, "There are no audio clips available", EditorStyles.popup);
             }
             else
             {
-                ValidateProperty(property);
+                var split = property.stringValue.Split('/');
+                var albumName = split.Length > 0 ? split[0] : string.Empty;
+                var clipName = split.Length > 1 ? split[1] : string.Empty;
+                var caption = property.stringValue.IsValuable()
+                    ? $"Album: {albumName} | Clip: {clipName}"
+                    : "Select Audio Clip";
 
-                EditorGUI.BeginChangeCheck();
-
-                if(m_Dropdown == null)
+                if (GUI.Button(fieldRect, new GUIContent(caption, "Select an album and audio clip"), EditorStyles.popup))
                 {
-                    m_Dropdown = new AudioPlayerClipAdvancedDropdown(new UnityEditor.IMGUI.Controls.AdvancedDropdownState(), m_AlbumClipsRelations, clip => OnClipSelectedCallback(clip, property));
-                }
-
-                if(m_ManualEnabled)
-                {
-                    property.stringValue = EditorGUI.TextField(dropdownRect, property.stringValue);
-                }
-                else
-                {
-                    var splits = property.stringValue.Split("/");
-
-                    var albumName = splits.Length > 0 ? splits[0] : string.Empty;
-                    var clipName = splits.Length > 1 ? splits[1] : string.Empty;
-
-                    if(GUI.Button(dropdownRect, string.Format($"Album: {albumName} | Clip: {clipName}"), EditorStyles.popup))
-                    {
-                        m_Dropdown.Show(dropdownRect);
-                    }
-                }
-
-            }
-
-            dropdownRect.x += dropdownRect.width;
-            dropdownRect.width = 20;
-
-            m_ManualEnabled = GUI.Toggle(dropdownRect, m_ManualEnabled, EditorGUIUtility.IconContent("d_editicon.sml"), "Button");
-
-            EditorGUI.EndChangeCheck();
-        }
-
-        private void OnClipSelectedCallback(string formattedClip, SerializedProperty property)
-        {
-            property.serializedObject.Update();
-            property.stringValue = formattedClip;
-            property.serializedObject.ApplyModifiedProperties();
-        }
-
-        private void ValidateProperty(SerializedProperty property)
-        {
-            string clip;
-            string album;
-
-            if (!property.stringValue.IsValuable())
-            {
-                (album, clip) = GetDefaultAlbumAndClip();
-            }
-            else
-            {
-                var splits = property.stringValue.Split("/");
-
-                switch (splits.Length)
-                {
-                    case 0:
-                        (album, clip) = GetDefaultAlbumAndClip();
-                        break;
-
-                    case 1:
-                        album = splits[0];
-                        clip = GetDefaultClipOfAlbum(album);
-                        break;
-
-                    case 2:
-                        album = splits[0];
-                        clip = splits[1];
-
-                        break;
-
-                    default:
-                        (album, clip) = GetDefaultAlbumAndClip();
-                        break;
+                    var dropdown = new AudioPlayerClipAdvancedDropdown(
+                        new AdvancedDropdownState(),
+                        m_Groups,
+                        formattedId => OnClipSelected(formattedId, property)
+                    );
+                    dropdown.Show(fieldRect);
                 }
             }
 
-            property.stringValue = string.Join("/", album, clip);
+            var manualRect = fieldRect;
+            manualRect.x += manualRect.width + 2;
+            manualRect.width = 22;
+            m_ManualEnabled = GUI.Toggle(
+                manualRect,
+                m_ManualEnabled,
+                ToolboxEditorGUI.Icon("editicon.sml", "✎", "Toggle manual audio ID editing"),
+                "Button"
+            );
+
+            EditorGUI.EndProperty();
         }
 
-        private (string, string) GetDefaultAlbumAndClip()
-        {
-            var album = m_Albums[0];
-            var clip = GetDefaultClipOfAlbum(album);
-            return (album, clip);
-        }
-
-        private string GetDefaultClipOfAlbum(string album)
-        {
-            if(!AlbumExists(album))
-            {
-                return string.Empty;
-            }
-
-            var clips = m_AlbumClipsRelations[album];
-            return clips.Length > 0 ? clips[0] : string.Empty;
-        }
-
-        private bool AlbumExists(string album)
-        {
-            return m_Albums.Contains(album);
-        }
-
-        private bool ClipExistsInAlbum(string album, string clip)
-        {
-            var albumExists = AlbumExists(album);
-
-            if(albumExists)
-            {
-                return m_AlbumClipsRelations[album].Contains(clip);
-            }
-            else
-            {
-                return false;
-            }
-        }
-
-        private void ValidateClips(SerializedProperty property)
+        private void ValidateEntries()
         {
             if (m_AudioPlayerDataHolder == null)
             {
                 m_AudioPlayerDataHolder = ResourcesUtils.ResolveScriptable<AudioPlayerDataHolder>(SettingsData.audioPlayerResourcesDataPath);
             }
 
-            if (IsClipsChanged || m_Albums == null)
+            if (s_SceneGroups == null || IsClipsChanged)
             {
-                m_AlbumClipsRelations = new Dictionary<string, string[]>();
-
-                if(m_AudioPlayerDataHolder == null)
-                {
-                    return;
-                }
-
-                var albums = m_AudioPlayerDataHolder.Albums.ToList();
-                var gameObject = (property.GetValue() as Component).gameObject;
-                var sceneEntries = GetSceneEntries(gameObject);
-                
-                foreach(var entry in sceneEntries)
-                {
-                    albums.Add(entry);
-                }
-
-                m_Albums = albums.ConvertAll(a => a.albumName).ToArray();
-
-                foreach (var album in albums)
-                {
-                    m_AlbumClipsRelations.Add(album.albumName, album.clips.ConvertAll(c => c.id).ToArray());
-                }
-
-                m_Dropdown = new AudioPlayerClipAdvancedDropdown(new UnityEditor.IMGUI.Controls.AdvancedDropdownState(), m_AlbumClipsRelations, clip => OnClipSelectedCallback(clip, property));
+                s_SceneGroups = BuildSceneGroups();
                 IsClipsChanged = false;
             }
+
+            m_Groups = new List<AudioDropdownGroup>();
+            var mainAlbums = BuildAlbumGroups(m_AudioPlayerDataHolder?.Albums);
+
+            if (mainAlbums.Count > 0)
+            {
+                m_Groups.Add(new AudioDropdownGroup("Main Audio", mainAlbums));
+            }
+
+            m_Groups.AddRange(s_SceneGroups);
         }
 
-        private List<AudioAlbum> GetSceneEntries(GameObject sceneObject)
+        private static List<AudioDropdownGroup> BuildSceneGroups()
         {
-            var sceneAlbums = Resources.FindObjectsOfTypeAll<SceneAlbumsHolder>().Where(x => x.gameObject.scene == sceneObject.scene).ToArray();
+            var groups = new List<AudioDropdownGroup>();
 
-            var entries = new List<AudioAlbum>();
-
-            if (sceneAlbums.Length > 0)
+            foreach (var buildScene in BuildSettingsSceneUtils.GetScenes())
             {
-                for (int i = 0; i < sceneAlbums.Length; i++)
+                var scene = SceneManager.GetSceneByPath(buildScene.Path);
+                var isPreviewScene = !scene.IsValid() || !scene.isLoaded;
+
+                if (isPreviewScene)
                 {
-                    for (int j = 0; j < sceneAlbums[i].Albums.Count; j++)
+                    scene = EditorSceneManager.OpenPreviewScene(buildScene.Path);
+                }
+
+                try
+                {
+                    var vaultGroups = new List<AudioDropdownGroup>();
+                    var roots = scene.GetRootGameObjects();
+
+                    foreach (var vault in roots.SelectMany(root => root.GetComponentsInChildren<AudioVault>(true)))
                     {
-                        entries.Add(sceneAlbums[i].Albums[j]);
+                        var albums = BuildAlbumGroups(vault.Albums);
+
+                        if (albums.Count > 0)
+                        {
+                            vaultGroups.Add(new AudioDropdownGroup(
+                                vault.Name.IsValuable() ? vault.Name : vault.gameObject.name,
+                                albums
+                            ));
+                        }
+                    }
+
+                    foreach (var holder in roots.SelectMany(root => root.GetComponentsInChildren<SceneAlbumsHolder>(true)))
+                    {
+                        var albums = BuildAlbumGroups(holder.Albums);
+
+                        if (albums.Count > 0)
+                        {
+                            vaultGroups.Add(new AudioDropdownGroup(holder.gameObject.name, albums));
+                        }
+                    }
+
+                    if (vaultGroups.Count > 0)
+                    {
+                        groups.Add(new AudioDropdownGroup(buildScene.DisplayName, vaultGroups));
+                    }
+                }
+                finally
+                {
+                    if (isPreviewScene && scene.IsValid())
+                    {
+                        EditorSceneManager.ClosePreviewScene(scene);
                     }
                 }
             }
 
-            return entries;
+            return groups;
+        }
+
+        private static List<AudioDropdownGroup> BuildAlbumGroups(IEnumerable<AudioAlbum> albums)
+        {
+            if (albums == null)
+            {
+                return new List<AudioDropdownGroup>();
+            }
+
+            return albums
+                .Where(album => album != null && album.albumName.IsValuable())
+                .GroupBy(album => album.albumName)
+                .Select(group => new AudioDropdownGroup(
+                    group.Key,
+                    entries: group
+                        .Where(album => album.clips != null)
+                        .SelectMany(album => album.clips)
+                        .Where(clip => clip != null && clip.id.IsValuable())
+                        .Select(clip => clip.id)
+                        .Distinct()
+                        .Select(clipId => new AudioDropdownEntry(clipId, $"{group.Key}/{clipId}"))
+                        .ToList()
+                ))
+                .Where(group => group.Entries.Count > 0)
+                .ToList();
+        }
+
+        private static void OnClipSelected(string formattedId, SerializedProperty property)
+        {
+            property.serializedObject.Update();
+            property.stringValue = formattedId;
+            property.serializedObject.ApplyModifiedProperties();
+        }
+
+        private static void InvalidateSceneCache()
+        {
+            s_SceneGroups = null;
         }
     }
 }

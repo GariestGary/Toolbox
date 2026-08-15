@@ -17,6 +17,7 @@ namespace VolumeBox.Toolbox.Editor
         private PoolerEditor poolerEditor;
         private AudioPlayerEditor audioEditor;
         private int selectedTab;
+        private Vector2 scrollPosition;
 
         [MenuItem("Toolbox/Settings", priority = 1)]
         public static void ShowMyEditor()
@@ -60,6 +61,10 @@ namespace VolumeBox.Toolbox.Editor
 
         private void OnEnable()
         {
+            m_TabSkin = ResourcesUtils.GetOrLoadAsset(m_TabSkin, "toolbox_styles.guiskin");
+            m_MainSettingsIcon = ResourcesUtils.GetOrLoadAsset(m_MainSettingsIcon, "main_settings_icon.png");
+            m_PoolerIcon = ResourcesUtils.GetOrLoadAsset(m_PoolerIcon, "pooler_icon.png");
+            m_AudioPlayerIcon = ResourcesUtils.GetOrLoadAsset(m_AudioPlayerIcon, "audio_player_icon.png");
             InitEditors();
         }
 
@@ -75,6 +80,8 @@ namespace VolumeBox.Toolbox.Editor
 
         private void OnGUI()
         {
+            scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
+
             switch (DrawToolbar())
             {
                 case 0:
@@ -89,6 +96,8 @@ namespace VolumeBox.Toolbox.Editor
                 default:
                     break;
             }
+
+            EditorGUILayout.EndScrollView();
         }
 
         private int DrawToolbar()
@@ -101,12 +110,12 @@ namespace VolumeBox.Toolbox.Editor
                 }
 
                 var oldSkin = GUI.skin;
-                GUI.skin = ResourcesUtils.GetOrLoadAsset(m_TabSkin, "toolbox_styles.guiskin");
+                GUI.skin = m_TabSkin;
                 var content = new GUIContent[]
                 {
-                    new("Main Settings", ResourcesUtils.GetOrLoadAsset(m_MainSettingsIcon, "main_settings_icon.png")),
-                    new("Pooler", ResourcesUtils.GetOrLoadAsset(m_PoolerIcon, "pooler_icon.png")),
-                    new("Audio Player", ResourcesUtils.GetOrLoadAsset(m_AudioPlayerIcon, "audio_player_icon.png")),
+                    new("Main Settings", m_MainSettingsIcon),
+                    new("Pooler", m_PoolerIcon),
+                    new("Audio Player", m_AudioPlayerIcon),
                 };
                 
                 selectedTab = GUILayout.Toolbar(selectedTab, content, GUI.skin.GetStyle("Tab"), GUILayout.Height(40));
@@ -131,6 +140,17 @@ namespace VolumeBox.Toolbox.Editor
         private void OnLostFocus()
         {
             AudioUtils.StopAllPreviewClips();
+        }
+
+        private void OnDisable()
+        {
+            AudioUtils.StopAllPreviewClips();
+            DestroyImmediate(settingsEditor);
+            DestroyImmediate(poolerEditor);
+            DestroyImmediate(audioEditor);
+            settingsEditor = null;
+            poolerEditor = null;
+            audioEditor = null;
         }
     }
 }

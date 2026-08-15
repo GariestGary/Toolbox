@@ -28,6 +28,7 @@ namespace VolumeBox.Toolbox.Editor
 
             m_poolsList = serializedObject.FindProperty("poolsList");
             m_poolGCInterval = serializedObject.FindProperty("m_GarbageCollectorWorkInterval");
+            m_Skin = ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin");
         }
 
         public override VisualElement CreateInspectorGUI()
@@ -62,7 +63,7 @@ namespace VolumeBox.Toolbox.Editor
             
             if(m_poolsList.arraySize > 0)
             {
-                EditorGUILayout.LabelField("Pools:", ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin").GetStyle("Label"));
+                EditorGUILayout.LabelField("Pools:", m_Skin.GetStyle("Label"));
                 
                 if(GUILayout.Button("Expand All"))
                 {
@@ -91,12 +92,12 @@ namespace VolumeBox.Toolbox.Editor
                 {
                     if (pool.FindPropertyRelative("tag").stringValue.ToLower().Contains(searchValue.ToLower()))
                     {
-                        DrawElement(pool, m_poolsList, i, labelsWidth, ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin"));
+                        DrawElement(pool, m_poolsList, i, labelsWidth, m_Skin);
                     }
                 }
                 else
                 {
-                    DrawElement(pool, m_poolsList, i, labelsWidth, ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin"));
+                    DrawElement(pool, m_poolsList, i, labelsWidth, m_Skin);
                 }
                 GUILayout.Space(4);
                 EditorGUILayout.EndHorizontal();
@@ -135,9 +136,8 @@ namespace VolumeBox.Toolbox.Editor
 
             if (GUILayout.Button("Add Pool", GUILayout.Width(80), GUILayout.ExpandHeight(true)))
             {
-                poolsList.InsertArrayElementAtIndex(0);
-                poolsList.GetArrayElementAtIndex(0).FindPropertyRelative("tag").stringValue = string.Empty;
-                currentScrollPosY = 0;
+                AddPool(poolsList);
+                currentScrollPosY = float.MaxValue;
                 PoolerTagPropertyDrawer.IsPoolsChanged = true;
             }
 
@@ -157,6 +157,8 @@ namespace VolumeBox.Toolbox.Editor
             GUI.skin = oldSkin;
             EditorGUILayout.BeginHorizontal(GUILayout.Height(25));
             GUILayout.Space(4);
+            ToolboxEditorGUI.ArrayDragHandle(list, index);
+            GUILayout.Space(4);
             var tag = property.FindPropertyRelative("tag");
 
             EditorGUILayout.BeginVertical();
@@ -168,7 +170,7 @@ namespace VolumeBox.Toolbox.Editor
             var oldColor = GUI.backgroundColor;
             GUI.backgroundColor = buttonColor;
 
-            if (GUILayout.Button(EditorGUIUtility.IconContent("TreeEditor.Trash"), GUILayout.Width(25), GUILayout.ExpandHeight(true)))
+            if (GUILayout.Button(ToolboxEditorGUI.Icon("TreeEditor.Trash", "×", "Delete pool"), GUILayout.Width(25), GUILayout.ExpandHeight(true)))
             {
                 if (EditorUtility.DisplayDialog("Confirm delete", $"Are you sure want to delete {tag.stringValue} pool?", "Yes", "Cancel"))
                 {
@@ -252,6 +254,17 @@ namespace VolumeBox.Toolbox.Editor
             }
 
             EditorGUILayout.EndVertical();
+        }
+
+        public static void AddPool(SerializedProperty poolsList)
+        {
+            var index = poolsList.arraySize;
+            poolsList.arraySize++;
+            var pool = poolsList.GetArrayElementAtIndex(index);
+            pool.isExpanded = false;
+            pool.FindPropertyRelative("tag").stringValue = string.Empty;
+            pool.FindPropertyRelative("pooledObject").objectReferenceValue = null;
+            pool.FindPropertyRelative("size").intValue = 1;
         }
     }
 }

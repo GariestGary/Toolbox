@@ -5,6 +5,9 @@ using System.Linq;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
+#if UNITY_2023_2_OR_NEWER
+using UnityEngine.Audio;
+#endif
 
 namespace VolumeBox.Toolbox
 {
@@ -15,6 +18,9 @@ namespace VolumeBox.Toolbox
         public PlayType CurrentPlayType { get; private set; }
         public float CurrentPlayTime => _Album.source.time;
         public AudioClip CurrentPlayingClip { get; private set; }
+#if UNITY_2023_2_OR_NEWER
+        public AudioResource CurrentPlayingResource { get; private set; }
+#endif
 
         public event Action StartedPlaying;
         public event Action StoppedPlaying;
@@ -32,13 +38,20 @@ namespace VolumeBox.Toolbox
             CurrentPlayType = PlayType.NONE;
         }
 
+        internal AudioAlbum Album => _Album;
+
         public AudioClipInfo GetClip(string clipId)
         {
-            return _Album.clips.FirstOrDefault(c => c.id == clipId);
+            return _Album.clips?.FirstOrDefault(clip => clip.id == clipId);
         }
         
         private AudioClipInfo GetClip(List<AudioClipInfo> list, string id)
         {
+            if (list == null)
+            {
+                return null;
+            }
+
             var clips = list.Where(x => x.id == id).ToArray();
 
             return clips.Length switch
@@ -68,7 +81,32 @@ namespace VolumeBox.Toolbox
 
             Play(clipInfo.clip, volume, pitch, loop, playType);
         }
-        
+
+#if UNITY_2023_2_OR_NEWER
+        public void Play(AudioClip clip, float volume = 1, float pitch = 1, bool loop = false, PlayType playType = PlayType.ONE_SHOT)
+        {
+            Play((AudioResource)clip, volume, pitch, loop, playType);
+        }
+
+        public void Play(AudioResource resource, float volume = 1, float pitch = 1, bool loop = false, PlayType playType = PlayType.ONE_SHOT)
+        {
+            if (resource == null)
+            {
+                Debug.LogWarning($"Cannot play a null audio resource from album '{AlbumName}'");
+                return;
+            }
+
+            AudioPlayer.Play(_Album.source, resource, volume, pitch, loop, playType);
+            CurrentPlayState = PlayState.PLAYING;
+            CurrentPlayingResource = resource;
+            CurrentPlayingClip = resource as AudioClip;
+            _CurrentClipDuration = CurrentPlayingClip != null ? CurrentPlayingClip.length : 0;
+            CurrentPlayType = playType;
+            StartedPlaying?.Invoke();
+            ResetPlaybackTokenSource();
+            HandlePlayback(_PlaybackTokenSource.Token).Forget();
+        }
+#else
         public void Play(AudioClip clip, float volume = 1, float pitch = 1, bool loop = false, PlayType playType = PlayType.ONE_SHOT)
         {
             if (clip == null)
@@ -86,6 +124,7 @@ namespace VolumeBox.Toolbox
             ResetPlaybackTokenSource();
             HandlePlayback(_PlaybackTokenSource.Token).Forget();
         }
+#endif
 
         public void Stop()
         {
@@ -114,14 +153,38 @@ namespace VolumeBox.Toolbox
 
         private async UniTask HandlePlayback(CancellationToken token = default)
         {
+#if UNITY_2023_2_OR_NEWER
+            if (CurrentPlayingResource == null)
+#else
             if (CurrentPlayingClip == null)
+#endif
             {
                 return;
             }
-            
+
+#if UNITY_2023_2_OR_NEWER
+            if (CurrentPlayingClip == null)
+            {
+                await UniTask.Yield(token);
+
+                while (_Album.source.isPlaying)
+                {
+                    if (token.IsCancellationRequested || CurrentPlayingResource == null || CurrentPlayState == PlayState.STOPPED)
+                    {
+                        break;
+                    }
+
+                    await UniTask.Yield(token);
+                }
+
+                HandleClipEnd();
+                return;
+            }
+#endif
+
             while (_Album.source.time < _CurrentClipDuration)
             {
-                if (token.IsCancellationRequested ||CurrentPlayingClip == null || CurrentPlayState == PlayState.STOPPED)
+                if (token.IsCancellationRequested || CurrentPlayingClip == null || CurrentPlayState == PlayState.STOPPED)
                 {
                     break;
                 }
@@ -140,12 +203,16 @@ namespace VolumeBox.Toolbox
             }
 
             CurrentPlayingClip = null;
+#if UNITY_2023_2_OR_NEWER
+            CurrentPlayingResource = null;
+#endif
             CurrentPlayState = PlayState.STOPPED;
             CurrentPlayType = PlayType.NONE;
         }
 
         public void AddClip(AudioClipInfo audioClipInfo)
         {
+            _Album.clips ??= new List<AudioClipInfo>();
             _Album.clips.Add(audioClipInfo);
         }
 

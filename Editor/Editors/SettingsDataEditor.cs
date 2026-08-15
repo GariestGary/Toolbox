@@ -33,6 +33,7 @@ namespace VolumeBox.Toolbox.Editor
             m_targetFrameRate = serializedObject.FindProperty("TargetFrameRate");
             m_initialSceneName = serializedObject.FindProperty("InitialSceneName");
             m_initialSceneArgs = serializedObject.FindProperty("InitialSceneArgs");
+            m_Skin = ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin");
 
             RebuildScenesList();
         }
@@ -73,7 +74,7 @@ namespace VolumeBox.Toolbox.Editor
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(5);
             //HEADER
-            GUI.skin = ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin");
+            GUI.skin = m_Skin;
             EditorGUILayout.BeginVertical(GUI.skin.FindStyle("Box"));
             GUI.skin = oldSkin;
             EditorGUILayout.LabelField("Scene Management", EditorStyles.largeLabel);
@@ -97,7 +98,7 @@ namespace VolumeBox.Toolbox.Editor
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(5);
             //HEADER
-            GUI.skin = ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin");
+            GUI.skin = m_Skin;
             EditorGUILayout.BeginVertical(GUI.skin.FindStyle("Box"));
             GUI.skin = oldSkin;
             EditorGUILayout.LabelField("Timings", EditorStyles.largeLabel);
@@ -111,13 +112,8 @@ namespace VolumeBox.Toolbox.Editor
             GUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Target Frame Rate", GUILayout.Width(LABEL_WIDTH));
             var oldFramerate = m_targetFrameRate.intValue;
-            var newFramerate = EditorGUILayout.IntField(GUIContent.none, m_targetFrameRate.intValue);
+            var newFramerate = Mathf.Max(1, EditorGUILayout.IntField(GUIContent.none, m_targetFrameRate.intValue));
             m_targetFrameRate.intValue = newFramerate;
-
-            if(newFramerate < 0)
-            {
-                newFramerate = 0;
-            }
 
             if(oldFramerate != newFramerate)
             {
@@ -144,7 +140,7 @@ namespace VolumeBox.Toolbox.Editor
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(5);
             //HEADER
-            GUI.skin = ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin");
+            GUI.skin = m_Skin;
             EditorGUILayout.BeginVertical(GUI.skin.FindStyle("Box"));
             GUI.skin = oldSkin;
             EditorGUILayout.LabelField("Initial Scene", EditorStyles.largeLabel);
@@ -180,7 +176,7 @@ namespace VolumeBox.Toolbox.Editor
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(5);
             //HEADER
-            GUI.skin = ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin");
+            GUI.skin = m_Skin;
             EditorGUILayout.BeginVertical(GUI.skin.FindStyle("Box"));
             GUI.skin = oldSkin;
             EditorGUILayout.LabelField("Messenger", EditorStyles.largeLabel);

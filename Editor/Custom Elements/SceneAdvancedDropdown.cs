@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using UnityEditor;
 using UnityEditor.IMGUI.Controls;
 
@@ -20,28 +21,18 @@ namespace VolumeBox.Toolbox.Editor
 
         public static string[] GetFormattedScenesList()
         {
-            var scenes = new string[EditorBuildSettings.scenes.Length];
-
-            for (int i = 0; i < EditorBuildSettings.scenes.Length; i++)
-            {
-                var scene = EditorBuildSettings.scenes[i];
-
-                int pos = scene.path.LastIndexOf("/") + 1;
-                scenes[i] = scene.path.Substring(pos, scene.path.Length - pos).Replace(".unity", "");
-            }
-
-            return scenes;
+            return BuildSettingsSceneUtils.GetScenes().Select(scene => scene.Value).ToArray();
         }
 
         protected override AdvancedDropdownItem BuildRoot()
         {
             var root = new AdvancedDropdownItem("Scenes");
 
-            var scenes = GetFormattedScenesList();
+            var scenes = BuildSettingsSceneUtils.GetScenes();
 
-            for (int i = 0; i < scenes.Length; i++)
+            for (int i = 0; i < scenes.Count; i++)
             {
-                root.AddChild(new AdvancedDropdownItem(scenes[i]));
+                root.AddChild(new SceneAdvancedDropdownItem(scenes[i].DisplayName, scenes[i].Value));
             }
 
             return root;
@@ -49,7 +40,20 @@ namespace VolumeBox.Toolbox.Editor
 
         protected override void ItemSelected(AdvancedDropdownItem item)
         {
-            m_Callback?.Invoke(item.name);
+            if (item is SceneAdvancedDropdownItem sceneItem)
+            {
+                m_Callback?.Invoke(sceneItem.Value);
+            }
+        }
+    }
+
+    public class SceneAdvancedDropdownItem : AdvancedDropdownItem
+    {
+        public string Value { get; }
+
+        public SceneAdvancedDropdownItem(string name, string value) : base(name)
+        {
+            Value = value;
         }
     }
 }
