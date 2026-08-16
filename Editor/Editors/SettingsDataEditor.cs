@@ -13,9 +13,9 @@ namespace VolumeBox.Toolbox.Editor
     [CustomEditor(typeof(SettingsData))]
     public class SettingsDataEditor: UnityEditor.Editor
     {
-        private GUISkin m_Skin;
-
         public const float LABEL_WIDTH = 150;
+        private const float SECTION_MARGIN = 3f;
+        private const int SECTION_PADDING = 10;
 
         private SerializedProperty m_resolveAtPlay;
         private SerializedProperty m_timeScale;
@@ -33,8 +33,6 @@ namespace VolumeBox.Toolbox.Editor
             m_targetFrameRate = serializedObject.FindProperty("TargetFrameRate");
             m_initialSceneName = serializedObject.FindProperty("InitialSceneName");
             m_initialSceneArgs = serializedObject.FindProperty("InitialSceneArgs");
-            m_Skin = ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin");
-
             RebuildScenesList();
         }
 
@@ -63,21 +61,17 @@ namespace VolumeBox.Toolbox.Editor
 
         public void DrawIMGUI()
         {
-            var oldSkin = GUI.skin;
-
             serializedObject.Update();
 
             EditorGUI.BeginChangeCheck();
 
             //SCENE MANAGEMENT
-            GUILayout.Space(5);
+            GUILayout.Space(SECTION_MARGIN);
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Space(5);
+            GUILayout.Space(SECTION_MARGIN);
             //HEADER
-            GUI.skin = m_Skin;
-            EditorGUILayout.BeginVertical(GUI.skin.FindStyle("Box"));
-            GUI.skin = oldSkin;
-            EditorGUILayout.LabelField("Scene Management", EditorStyles.largeLabel);
+            ToolboxEditorGUI.BeginRoundedVertical(SECTION_PADDING);
+            EditorGUILayout.LabelField("Scene Management", EditorStyles.boldLabel);
             EditorGUILayout.Space(5);
 
             GUILayout.BeginHorizontal();
@@ -88,19 +82,17 @@ namespace VolumeBox.Toolbox.Editor
             GUILayout.EndHorizontal();
 
             GUILayout.Space(3);
-            EditorGUILayout.EndVertical();
-            GUILayout.Space(5);
+            ToolboxEditorGUI.EndRoundedVertical();
+            GUILayout.Space(SECTION_MARGIN);
             EditorGUILayout.EndHorizontal();
-            GUILayout.Space(5);
+            GUILayout.Space(SECTION_MARGIN);
 
 
             //TIMINGS
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Space(5);
+            GUILayout.Space(SECTION_MARGIN);
             //HEADER
-            GUI.skin = m_Skin;
-            EditorGUILayout.BeginVertical(GUI.skin.FindStyle("Box"));
-            GUI.skin = oldSkin;
+            ToolboxEditorGUI.BeginRoundedVertical(SECTION_PADDING);
             EditorGUILayout.LabelField("Timings", EditorStyles.largeLabel);
             EditorGUILayout.Space(5);
 
@@ -131,18 +123,16 @@ namespace VolumeBox.Toolbox.Editor
             }
 
             GUILayout.Space(3);
-            EditorGUILayout.EndVertical();
-            GUILayout.Space(5);
+            ToolboxEditorGUI.EndRoundedVertical();
+            GUILayout.Space(SECTION_MARGIN);
             EditorGUILayout.EndHorizontal();
-            GUILayout.Space(5);
+            GUILayout.Space(SECTION_MARGIN);
 
             //INITIAL SCENE
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Space(5);
+            GUILayout.Space(SECTION_MARGIN);
             //HEADER
-            GUI.skin = m_Skin;
-            EditorGUILayout.BeginVertical(GUI.skin.FindStyle("Box"));
-            GUI.skin = oldSkin;
+            ToolboxEditorGUI.BeginRoundedVertical(SECTION_PADDING);
             EditorGUILayout.LabelField("Initial Scene", EditorStyles.largeLabel);
             EditorGUILayout.Space(5);
 
@@ -166,19 +156,17 @@ namespace VolumeBox.Toolbox.Editor
             GUILayout.EndHorizontal();
 
             GUILayout.Space(3);
-            EditorGUILayout.EndVertical();
-            GUILayout.Space(5);
+            ToolboxEditorGUI.EndRoundedVertical();
+            GUILayout.Space(SECTION_MARGIN);
             EditorGUILayout.EndHorizontal();
-            GUILayout.Space(5);
+            GUILayout.Space(SECTION_MARGIN);
 
 
             //MESSENGER
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Space(5);
+            GUILayout.Space(SECTION_MARGIN);
             //HEADER
-            GUI.skin = m_Skin;
-            EditorGUILayout.BeginVertical(GUI.skin.FindStyle("Box"));
-            GUI.skin = oldSkin;
+            ToolboxEditorGUI.BeginRoundedVertical(SECTION_PADDING);
             EditorGUILayout.LabelField("Messenger", EditorStyles.largeLabel);
             EditorGUILayout.Space(5);
 
@@ -202,8 +190,8 @@ namespace VolumeBox.Toolbox.Editor
             }
 
             GUILayout.Space(3);
-            EditorGUILayout.EndVertical();
-            GUILayout.Space(5);
+            ToolboxEditorGUI.EndRoundedVertical();
+            GUILayout.Space(SECTION_MARGIN);
             EditorGUILayout.EndHorizontal();
         }
     }

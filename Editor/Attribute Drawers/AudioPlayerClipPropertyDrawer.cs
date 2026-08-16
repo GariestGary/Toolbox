@@ -42,8 +42,8 @@ namespace VolumeBox.Toolbox.Editor
             EditorGUI.LabelField(labelRect, label);
 
             var fieldRect = position;
-            fieldRect.x += labelRect.width + 2;
-            fieldRect.width -= labelRect.width + 24;
+            fieldRect.x += labelRect.width;
+            fieldRect.width -= labelRect.width + 5;
 
             if (m_ManualEnabled)
             {
@@ -74,8 +74,8 @@ namespace VolumeBox.Toolbox.Editor
             }
 
             var manualRect = fieldRect;
-            manualRect.x += manualRect.width + 2;
-            manualRect.width = 22;
+            manualRect.x += manualRect.width;
+            manualRect.width = 20;
             m_ManualEnabled = GUI.Toggle(
                 manualRect,
                 m_ManualEnabled,
@@ -142,7 +142,7 @@ namespace VolumeBox.Toolbox.Editor
                         }
                     }
 
-                    foreach (var holder in roots.SelectMany(root => root.GetComponentsInChildren<SceneAlbumsHolder>(true)))
+                    foreach (var holder in roots.SelectMany(root => root.GetComponentsInChildren<AudioVault>(true)))
                     {
                         var albums = BuildAlbumGroups(holder.Albums);
 

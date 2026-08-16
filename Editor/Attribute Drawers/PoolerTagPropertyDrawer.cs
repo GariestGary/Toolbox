@@ -41,7 +41,7 @@ namespace VolumeBox.Toolbox.Editor
 
             var poolRect = position;
             poolRect.x += labelRect.width;
-            poolRect.width -= labelRect.width + 20;
+            poolRect.width -= labelRect.width + 5;
             bool hasPools = m_PoolerEntries.Length > 0 || m_ScenePoolGroups.Count > 0;
             
             if(!hasPools && !m_ManualEnabled && !property.stringValue.IsValuable())

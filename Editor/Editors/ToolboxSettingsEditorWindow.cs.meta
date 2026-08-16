@@ -10,7 +10,6 @@ MonoImporter:
   - m_PoolerIcon: {fileID: 2800000, guid: 505c57f0827e1d74f9b0a4217572f4d4, type: 3}
   - m_AudioPlayerIcon: {fileID: 2800000, guid: 0290b4a8d765dc94c9c70090264171f7, type: 3}
   - m_DatabaseIcon: {fileID: 2800000, guid: e1cbff8e0f037f0489175b87bacdd2a7, type: 3}
-  - m_TabSkin: {fileID: 11400000, guid: e1583d1cac683a04ba2f29e18c2d6b9f, type: 2}
   executionOrder: 0
   icon: {instanceID: 0}
   userData: 

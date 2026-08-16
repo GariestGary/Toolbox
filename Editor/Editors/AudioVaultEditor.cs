@@ -15,7 +15,6 @@ namespace VolumeBox.Toolbox.Editor
             { 2, "Manual" }
         };
 
-        private GUISkin m_Skin;
         private SerializedProperty m_AudioVaultName;
         private SerializedProperty m_Albums;
         private SerializedProperty m_RunType;
@@ -27,7 +26,6 @@ namespace VolumeBox.Toolbox.Editor
             m_AudioVaultName = serializedObject.FindProperty("m_AudioVaultName");
             m_Albums = serializedObject.FindProperty("m_Albums");
             m_RunType = serializedObject.FindProperty("m_RunType");
-            m_Skin = ResourcesUtils.GetOrLoadAsset(m_Skin, "toolbox_styles.guiskin");
         }
 
         public override void OnInspectorGUI()
@@ -49,12 +47,11 @@ namespace VolumeBox.Toolbox.Editor
             }
 
             EditorGUILayout.EndHorizontal();
+            ToolboxEditorGUI.DividerLine();
             AudioPlayerEditor.DrawAlbums(
                 m_Albums,
                 ref m_SearchValue,
-                ref m_ScrollPosition,
-                m_Skin,
-                true
+                ref m_ScrollPosition
             );
 
             serializedObject.ApplyModifiedProperties();

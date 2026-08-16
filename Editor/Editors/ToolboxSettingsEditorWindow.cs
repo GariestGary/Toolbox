@@ -10,7 +10,6 @@ namespace VolumeBox.Toolbox.Editor
         private Texture2D m_MainSettingsIcon;
         private Texture2D m_PoolerIcon;
         private Texture2D m_AudioPlayerIcon;
-        private GUISkin m_TabSkin;
         private PoolerDataHolder poolerDataHolder;
         private AudioPlayerDataHolder audioPlayerDataHolder;
         private SettingsDataEditor settingsEditor;
@@ -61,7 +60,6 @@ namespace VolumeBox.Toolbox.Editor
 
         private void OnEnable()
         {
-            m_TabSkin = ResourcesUtils.GetOrLoadAsset(m_TabSkin, "toolbox_styles.guiskin");
             m_MainSettingsIcon = ResourcesUtils.GetOrLoadAsset(m_MainSettingsIcon, "main_settings_icon.png");
             m_PoolerIcon = ResourcesUtils.GetOrLoadAsset(m_PoolerIcon, "pooler_icon.png");
             m_AudioPlayerIcon = ResourcesUtils.GetOrLoadAsset(m_AudioPlayerIcon, "audio_player_icon.png");
@@ -80,7 +78,7 @@ namespace VolumeBox.Toolbox.Editor
 
         private void OnGUI()
         {
-            scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
+            scrollPosition = ToolboxEditorGUI.BeginVerticalScrollView(scrollPosition);
 
             switch (DrawToolbar())
             {
@@ -109,8 +107,6 @@ namespace VolumeBox.Toolbox.Editor
                     InitEditors();
                 }
 
-                var oldSkin = GUI.skin;
-                GUI.skin = m_TabSkin;
                 var content = new GUIContent[]
                 {
                     new("Main Settings", m_MainSettingsIcon),
@@ -118,8 +114,9 @@ namespace VolumeBox.Toolbox.Editor
                     new("Audio Player", m_AudioPlayerIcon),
                 };
                 
-                selectedTab = GUILayout.Toolbar(selectedTab, content, GUI.skin.GetStyle("Tab"), GUILayout.Height(40));
-                GUI.skin = oldSkin;
+                selectedTab = ToolboxEditorGUI.DrawTabs(selectedTab, content);
+                
+                ToolboxEditorGUI.DividerLine();
 
                 return selectedTab;
             }
@@ -135,6 +132,7 @@ namespace VolumeBox.Toolbox.Editor
 
                 return -1;
             }
+            
         }
 
         private void OnLostFocus()
