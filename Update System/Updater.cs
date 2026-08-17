@@ -36,6 +36,8 @@ namespace VolumeBox.Toolbox
 
         private readonly List<MonoCached> _RunningMonos = new List<MonoCached>();
         private readonly HashSet<MonoCached> _RunningMonosSet = new HashSet<MonoCached>();
+        private readonly HashSet<MonoCached> _PendingRemovals = new HashSet<MonoCached>();
+        private bool _IsIteratingRunningMonos;
         private List<Action<float>> _CustomTicks = new List<Action<float>>();
         private List<Action<float>> _CustomFixedTicks = new List<Action<float>>();
         private List<Action<float>> _CustomLateTicks = new List<Action<float>>();
@@ -83,6 +85,8 @@ namespace VolumeBox.Toolbox
         /// <param name="objs">Array of GameObjects</param>
         public void InitializeObjects(GameObject[] objs)
         {
+            FlushPendingRemovals();
+
             if (objs == null || objs.Length == 0)
             {
                 return;
@@ -113,6 +117,8 @@ namespace VolumeBox.Toolbox
             {
                 RemoveMonoFromUpdate(monos[i]);
             }
+
+            FlushPendingRemovals();
         }
 
         private static void CollectMonos(
@@ -140,6 +146,8 @@ namespace VolumeBox.Toolbox
         /// <param name="obj"></param>
         public void InitializeObject(GameObject obj)
         {
+            FlushPendingRemovals();
+
             if (obj == null) return;
 
             var objMonos = obj.GetComponentsInChildren<MonoCached>(true);
@@ -148,6 +156,8 @@ namespace VolumeBox.Toolbox
 
         public void InitializeMonos(IEnumerable<MonoCached> monos)
         {
+            FlushPendingRemovals();
+
             if (monos == null)
             {
                 return;
@@ -158,7 +168,13 @@ namespace VolumeBox.Toolbox
 
             foreach (var mono in monos)
             {
-                if (mono == null || _RunningMonosSet.Contains(mono) || !batchSet.Add(mono))
+                if (mono == null || !batchSet.Add(mono))
+                {
+                    continue;
+                }
+
+                if ((_PendingRemovals.Count > 0 && RestorePendingMono(mono)) ||
+                    _RunningMonosSet.Contains(mono))
                 {
                     continue;
                 }
@@ -196,7 +212,17 @@ namespace VolumeBox.Toolbox
         /// </summary>
         public void InitializeMono(MonoCached mono)
         {
-            if (mono == null || _RunningMonosSet.Contains(mono)) return;
+            FlushPendingRemovals();
+
+            if (mono == null) return;
+
+            if (_PendingRemovals.Count > 0 && RestorePendingMono(mono))
+            {
+                mono.Resume();
+                return;
+            }
+
+            if (_RunningMonosSet.Contains(mono)) return;
 
             InvokeRise(mono);
             InvokeReady(mono);
@@ -217,11 +243,58 @@ namespace VolumeBox.Toolbox
             if (mono == null) return;
 
             mono.Pause();
-            var removedFromSet = _RunningMonosSet.Remove(mono);
-            var removedFromList = _RunningMonos.Remove(mono);
+            if (_RunningMonosSet.Remove(mono))
+            {
+                _PendingRemovals.Add(mono);
+            }
+        }
+
+        private void FlushPendingRemovals()
+        {
+            if (_PendingRemovals.Count == 0 || _IsIteratingRunningMonos)
+            {
+                return;
+            }
+
+            var writeIndex = 0;
+
+            for (int readIndex = 0; readIndex < _RunningMonos.Count; readIndex++)
+            {
+                var mono = _RunningMonos[readIndex];
+                if (_PendingRemovals.Contains(mono))
+                {
+                    continue;
+                }
+
+                if (writeIndex != readIndex)
+                {
+                    _RunningMonos[writeIndex] = mono;
+                }
+
+                writeIndex++;
+            }
+
+            if (writeIndex < _RunningMonos.Count)
+            {
+                _RunningMonos.RemoveRange(writeIndex, _RunningMonos.Count - writeIndex);
+            }
+
+            _PendingRemovals.Clear();
             Debug.Assert(
-                removedFromSet == removedFromList,
+                _RunningMonos.Count == _RunningMonosSet.Count,
                 "Updater running MonoCached collections are out of sync");
+        }
+
+        private bool RestorePendingMono(MonoCached mono)
+        {
+            if (!_PendingRemovals.Remove(mono))
+            {
+                return false;
+            }
+
+            var restored = _RunningMonosSet.Add(mono);
+            Debug.Assert(restored, "Updater pending MonoCached was already logically running");
+            return true;
         }
         
         private void InvokeRise(MonoCached mono)
@@ -237,12 +310,21 @@ namespace VolumeBox.Toolbox
         #region Updates
         private void Update()
         {
+            FlushPendingRemovals();
             _InternalDelta = Time.deltaTime * TimeScale;
 
-            for (int i = 0; i < _RunningMonos.Count; i++)
+            _IsIteratingRunningMonos = true;
+            try
             {
-                var deltaToUse = _RunningMonos[i].IgnoreTimeScale ? Time.deltaTime : _InternalDelta;
-                _RunningMonos[i].ProcessControl(deltaToUse);
+                for (int i = 0; i < _RunningMonos.Count; i++)
+                {
+                    var deltaToUse = _RunningMonos[i].IgnoreTimeScale ? Time.deltaTime : _InternalDelta;
+                    _RunningMonos[i].ProcessControl(deltaToUse);
+                }
+            }
+            finally
+            {
+                _IsIteratingRunningMonos = false;
             }
 
             foreach (var tick in _CustomTicks)
@@ -253,12 +335,21 @@ namespace VolumeBox.Toolbox
 
         private void FixedUpdate()
         {
+            FlushPendingRemovals();
             float fixedDelta = Time.fixedDeltaTime * _InternalTimeScale;
 
-            for (int i = 0; i < _RunningMonos.Count; i++)
+            _IsIteratingRunningMonos = true;
+            try
             {
-                var deltaToUse = _RunningMonos[i].IgnoreTimeScale ? Time.fixedDeltaTime : fixedDelta;
-                _RunningMonos[i].FixedProcessControl(deltaToUse);
+                for (int i = 0; i < _RunningMonos.Count; i++)
+                {
+                    var deltaToUse = _RunningMonos[i].IgnoreTimeScale ? Time.fixedDeltaTime : fixedDelta;
+                    _RunningMonos[i].FixedProcessControl(deltaToUse);
+                }
+            }
+            finally
+            {
+                _IsIteratingRunningMonos = false;
             }
 
             foreach (var fixedTick in _CustomFixedTicks)
@@ -269,10 +360,20 @@ namespace VolumeBox.Toolbox
 
         private void LateUpdate()
         {
-            for (int i = 0; i < _RunningMonos.Count; i++)
+            FlushPendingRemovals();
+
+            _IsIteratingRunningMonos = true;
+            try
             {
-                var deltaToUse = _RunningMonos[i].IgnoreTimeScale ? Time.deltaTime : _InternalDelta;
-                _RunningMonos[i].LateProcessControl(deltaToUse);
+                for (int i = 0; i < _RunningMonos.Count; i++)
+                {
+                    var deltaToUse = _RunningMonos[i].IgnoreTimeScale ? Time.deltaTime : _InternalDelta;
+                    _RunningMonos[i].LateProcessControl(deltaToUse);
+                }
+            }
+            finally
+            {
+                _IsIteratingRunningMonos = false;
             }
 
             foreach (var lateTick in _CustomLateTicks)

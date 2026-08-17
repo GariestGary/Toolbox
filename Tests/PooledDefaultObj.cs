@@ -57,4 +57,14 @@ namespace VolumeBox.Toolbox.Tests
             ReadyCount++;
         }
     }
+
+    internal class ReentrantPooledObj : MonoCached, IPooled
+    {
+        public static System.Action SpawnAction;
+
+        public void OnSpawn()
+        {
+            SpawnAction?.Invoke();
+        }
+    }
 }

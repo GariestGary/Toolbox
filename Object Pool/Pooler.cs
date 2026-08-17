@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
@@ -17,6 +16,7 @@ namespace VolumeBox.Toolbox
         private List<Pool> pools = new List<Pool>();
         private readonly Dictionary<string, List<Pool>> _poolsByTag = new(StringComparer.Ordinal);
         private readonly List<Pool> _poolsWithNullTag = new();
+        private readonly Dictionary<GameObject, PooledGameObject> _pooledObjectsByGameObject = new();
         private GameObjectRemovedMessage _removeMessage;
         private CancellationTokenSource m_GCTokenSource = new CancellationTokenSource();
         private Messenger _Msg;
@@ -30,9 +30,11 @@ namespace VolumeBox.Toolbox
             
             SetCustomRoot(_PredefinedRoot);
 
+            ClearPoolAvailabilityState();
             pools = new List<Pool>();
             _poolsByTag.Clear();
             _poolsWithNullTag.Clear();
+            _pooledObjectsByGameObject.Clear();
 
             for (int i = 0; i < _Data.PoolsList.Count; i++)
             {
@@ -105,7 +107,7 @@ namespace VolumeBox.Toolbox
 
             for (int i = 0; i < pool.objects.Count; i++)
             {
-                if (!pool.objects[i].Used)
+                if (!pool.objects[i].Used && !pool.objects[i].AvailabilityReserved)
                 {
                     unusedCount++;
                 }
@@ -122,13 +124,14 @@ namespace VolumeBox.Toolbox
             {
                 var pooledObject = pool.objects[i];
 
-                if (pooledObject.Used)
+                if (pooledObject.Used || pooledObject.AvailabilityReserved)
                 {
                     i++;
                     continue;
                 }
 
-                pool.objects.RemoveAt(i);
+                pool.RemovePooledObjectAt(i);
+                UnregisterPooledObject(pooledObject);
                 Destroy(pooledObject.GameObject);
                 _removeMessage.Obj = pooledObject.GameObject;
                 _removeMessage.RemoveType = GameObjectRemoveType.Destroyed;
@@ -139,13 +142,28 @@ namespace VolumeBox.Toolbox
 
         #endregion
 
+        private void ClearPoolAvailabilityState()
+        {
+            if (pools == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < pools.Count; i++)
+            {
+                pools[i]?.DetachAllPooledObjects();
+            }
+        }
+
         public void Clear()
         {
             objectPoolParent = null;
+            ClearPoolAvailabilityState();
             pools?.Clear();
             pools = null;
             _poolsByTag.Clear();
             _poolsWithNullTag.Clear();
+            _pooledObjectsByGameObject.Clear();
         }
 
         public bool TryRemovePool(Pool pool)
@@ -168,6 +186,12 @@ namespace VolumeBox.Toolbox
                 Destroy(obj.GameObject);
             }
 
+            for (int i = 0; i < pool.objects.Count; i++)
+            {
+                UnregisterPooledObject(pool.objects[i]);
+            }
+
+            pool.DetachAllPooledObjects();
             pools.Remove(pool);
             UnregisterPool(pool);
             return true;
@@ -197,19 +221,38 @@ namespace VolumeBox.Toolbox
                 pools = new List<Pool>();
             }
 
-            List<PooledGameObject> objectPoolList = new List<PooledGameObject>();
-
             if(poolToAdd.size <= 0)
             {
                 poolToAdd.size = 1;
             }
 
-            for (int j = 0; j < poolToAdd.size; j++)
+            var pool = new Pool(
+                poolToAdd.tag,
+                poolToAdd.pooledObject,
+                poolToAdd.size,
+                instantiateFunc: instantiateFunc,
+                spawnFunc: spawnAction);
+
+            try
             {
-                CreateNewPoolObject(poolToAdd.pooledObject, objectPoolList, true, instantiateFunc);
+                for (int j = 0; j < poolToAdd.size; j++)
+                {
+                    CreateNewPoolObject(poolToAdd.pooledObject, pool, true, instantiateFunc);
+                }
+            }
+            catch
+            {
+                for (int i = 0; i < pool.objects.Count; i++)
+                {
+                    var pooledObject = pool.objects[i];
+                    UnregisterPooledObject(pooledObject);
+                    Destroy(pooledObject.GameObject);
+                }
+
+                pool.DetachAllPooledObjects();
+                throw;
             }
 
-            var pool = new Pool(poolToAdd.tag, poolToAdd.pooledObject, poolToAdd.size, objectPoolList, instantiateFunc, spawnAction);
             pools.Add(pool);
             RegisterPool(pool);
             return pool;
@@ -321,15 +364,15 @@ namespace VolumeBox.Toolbox
                 return null;
             }
 
-            //get first unused obj
+            // Preserve random selection between pools sharing the same tag.
             var poolToUse = poolsToUse[UnityEngine.Random.Range(0, poolsToUse.Count)];
-            var objToSpawn = poolToUse.objects.FirstOrDefault(o => !o.Used);
+            var objToSpawn = poolToUse.TakeFirstAvailable();
 
-            //Create new object if last in list is active
+            // Expand only the selected pool and acquire the newly available object without scanning.
             if (objToSpawn is null)
             {
-                CreateNewPoolObject(poolToUse.referenceObject, poolToUse.objects, true, poolToUse.instantiateFunc);
-                objToSpawn = poolToUse.objects.FirstOrDefault(o => !o.Used);
+                CreateNewPoolObject(poolToUse.referenceObject, poolToUse, true, poolToUse.instantiateFunc);
+                objToSpawn = poolToUse.TakeFirstAvailable();
             }
 
             //Return null if last object is null;
@@ -339,31 +382,43 @@ namespace VolumeBox.Toolbox
                 return null;
             }
 
-            //Calling spawn action
-            poolToUse.spawnFunc?.Invoke(objToSpawn.GameObject);  
-            
-            //Setting transform
-            var t = objToSpawn.GameObject.transform;
-            t.SetParent(parent);
-            t.localPosition = Vector3.zero;
-            t.localScale = Vector3.one;
-            t.position = position;
-            t.rotation = rotation;
-            objToSpawn.GameObject.Enable();
-
-            //Call all spawn methods in gameobject
-            if (traverseHierarchy)
+            try
             {
-                CallSpawns(objToSpawn, data);
-            }
-            else
-            {
-                CallSpawn(objToSpawn, data);
-            }
+                //Calling spawn action
+                poolToUse.spawnFunc?.Invoke(objToSpawn.GameObject);
 
-            objToSpawn.Used = true;
-            
-            return objToSpawn.GameObject;
+                //Setting transform
+                var t = objToSpawn.GameObject.transform;
+                t.SetParent(parent);
+                t.localPosition = Vector3.zero;
+                t.localScale = Vector3.one;
+                t.position = position;
+                t.rotation = rotation;
+                objToSpawn.GameObject.Enable();
+
+                //Call all spawn methods in gameobject
+                if (traverseHierarchy)
+                {
+                    CallSpawns(objToSpawn, data);
+                }
+                else
+                {
+                    CallSpawn(objToSpawn, data);
+                }
+
+                objToSpawn.Used = true;
+                objToSpawn.AvailabilityReserved = false;
+                return objToSpawn.GameObject;
+            }
+            catch
+            {
+                if (!objToSpawn.Used)
+                {
+                    poolToUse.ReturnToAvailable(objToSpawn);
+                }
+
+                throw;
+            }
         }
 
         /// <summary>
@@ -497,40 +552,13 @@ namespace VolumeBox.Toolbox
                 return false;
             }
 
-            Pool p = null;
-            PooledGameObject pgo = null;
-
-            for (int i = 0; i < pools.Count; i++)
-            {
-                bool found = false;
-
-                for (int j = 0; j < pools[i].objects.Count; j++)
-                {
-                    var objToCheck = pools[i].objects[j];
-
-                    if (objToCheck.GameObject == objectToDespawn)
-                    {
-                        pgo = objToCheck;
-                        found = true;
-                        TraversePooledObjectAndDespawnOtherPooledObjects(objectToDespawn.transform);
-                        break;
-                    }
-                }
-
-                if(found)
-                {
-                    p = pools[i];
-                    break;
-                }
-            }
-
-            
-            if (p == null)
+            if (!_pooledObjectsByGameObject.TryGetValue(objectToDespawn, out var pooledObject))
             {
                 return false;
             }
 
-            return TryDespawn(pgo);
+            TraversePooledObjectAndDespawnOtherPooledObjects(objectToDespawn.transform);
+            return TryDespawn(pooledObject);
         }
 
         private bool TryDespawn(PooledGameObject pgo)
@@ -543,7 +571,15 @@ namespace VolumeBox.Toolbox
             CallDespawns(pgo);
 
             pgo.Used = false;
-            ReturnToPool(pgo.GameObject);
+
+            try
+            {
+                ReturnToPool(pgo.GameObject);
+            }
+            finally
+            {
+                pgo.OwnerPool?.ReturnToAvailable(pgo);
+            }
 
             _removeMessage.Obj = pgo.GameObject;
             _removeMessage.RemoveType = GameObjectRemoveType.Despawned;
@@ -610,17 +646,9 @@ namespace VolumeBox.Toolbox
         
         public ObjectPooledState IsObjectPooledAndUsed(GameObject obj)
         {
-            for (int i = 0; i < pools.Count; i++)
+            if (obj != null && _pooledObjectsByGameObject.TryGetValue(obj, out var pooledObject))
             {
-                for (int j = 0; j < pools[i].objects.Count; j++)
-                {
-                    var objToCheck = pools[i].objects[j];
-
-                    if (objToCheck.GameObject == obj)
-                    {
-                        return new(true, objToCheck.Used);
-                    }
-                }
+                return new ObjectPooledState(true, pooledObject.Used);
             }
 
             return new ObjectPooledState(false, false);
@@ -658,7 +686,7 @@ namespace VolumeBox.Toolbox
             }
         }
         
-        private GameObject CreateNewPoolObject(GameObject obj, List<PooledGameObject> poolQueue, bool addToPoolParent = true, Func<GameObject, Vector3, Quaternion, Transform, GameObject> instantiateFunc = null)
+        private GameObject CreateNewPoolObject(GameObject obj, Pool pool, bool addToPoolParent = true, Func<GameObject, Vector3, Quaternion, Transform, GameObject> instantiateFunc = null)
         {
             Transform poolParent = null;
 
@@ -678,10 +706,42 @@ namespace VolumeBox.Toolbox
                 SpawnHandlers = FindSpawnHandlers(poolObj),
                 DespawnHandlers = poolObj.GetComponentsInChildren<IDespawn>(true)
             };
-            
-            poolQueue.Add(pgo);
+
+            pool.AddPooledObject(pgo);
+
+            try
+            {
+                RegisterPooledObject(pgo);
+            }
+            catch
+            {
+                pool.RemovePooledObject(pgo);
+                throw;
+            }
 
             return poolObj;
+        }
+
+        private void RegisterPooledObject(PooledGameObject pooledObject)
+        {
+            var gameObject = pooledObject?.GameObject;
+
+            if (gameObject == null)
+            {
+                throw new InvalidOperationException("Cannot register a pooled object without a live GameObject");
+            }
+
+            _pooledObjectsByGameObject.Add(gameObject, pooledObject);
+        }
+
+        private void UnregisterPooledObject(PooledGameObject pooledObject)
+        {
+            var gameObject = pooledObject?.GameObject;
+
+            if (!ReferenceEquals(gameObject, null))
+            {
+                _pooledObjectsByGameObject.Remove(gameObject);
+            }
         }
 
         private PooledSpawnHandler[] FindSpawnHandlers(GameObject poolObject)
@@ -764,6 +824,9 @@ namespace VolumeBox.Toolbox
     
     public sealed class Pool
     {
+        private readonly List<PooledGameObject> _availableObjects = new();
+        private int _nextObjectOrder;
+
         public string tag;
         public int size;
         public GameObject referenceObject;
@@ -796,6 +859,249 @@ namespace VolumeBox.Toolbox
             {
                 this.objects = objects;
             }
+
+            try
+            {
+                for (int i = 0; i < this.objects.Count; i++)
+                {
+                    AttachPooledObject(this.objects[i]);
+                }
+            }
+            catch
+            {
+                DetachAllPooledObjects();
+                throw;
+            }
+        }
+
+        internal void AddPooledObject(PooledGameObject pooledObject)
+        {
+            objects.Add(pooledObject);
+
+            try
+            {
+                AttachPooledObject(pooledObject);
+            }
+            catch
+            {
+                if (ReferenceEquals(pooledObject?.OwnerPool, this))
+                {
+                    RemoveAvailable(pooledObject);
+                    DetachPooledObject(pooledObject);
+                }
+
+                objects.RemoveAt(objects.Count - 1);
+                throw;
+            }
+        }
+
+        internal bool RemovePooledObject(PooledGameObject pooledObject)
+        {
+            var index = objects.IndexOf(pooledObject);
+
+            if (index < 0)
+            {
+                return false;
+            }
+
+            RemovePooledObjectAt(index);
+            return true;
+        }
+
+        internal PooledGameObject RemovePooledObjectAt(int index)
+        {
+            var pooledObject = objects[index];
+            RemoveAvailable(pooledObject);
+            objects.RemoveAt(index);
+            DetachPooledObject(pooledObject);
+            return pooledObject;
+        }
+
+        internal PooledGameObject TakeFirstAvailable()
+        {
+            while (_availableObjects.Count > 0)
+            {
+                var pooledObject = _availableObjects[0];
+                RemoveAvailableAt(0);
+
+                if (!pooledObject.Used)
+                {
+                    pooledObject.AvailabilityReserved = true;
+                    return pooledObject;
+                }
+            }
+
+            return null;
+        }
+
+        internal bool ReturnToAvailable(PooledGameObject pooledObject)
+        {
+            if (pooledObject == null ||
+                !ReferenceEquals(pooledObject.OwnerPool, this) ||
+                pooledObject.Used ||
+                pooledObject.AvailableHeapIndex >= 0)
+            {
+                return false;
+            }
+
+            pooledObject.AvailabilityReserved = false;
+            AddAvailable(pooledObject);
+            return true;
+        }
+
+        internal void DetachAllPooledObjects()
+        {
+            for (int i = 0; i < _availableObjects.Count; i++)
+            {
+                _availableObjects[i].AvailableHeapIndex = -1;
+            }
+
+            _availableObjects.Clear();
+
+            for (int i = 0; i < objects.Count; i++)
+            {
+                DetachPooledObject(objects[i]);
+            }
+        }
+
+        private void AttachPooledObject(PooledGameObject pooledObject)
+        {
+            if (pooledObject == null)
+            {
+                throw new ArgumentNullException(nameof(pooledObject));
+            }
+
+            if (pooledObject.OwnerPool != null)
+            {
+                throw new InvalidOperationException("PooledGameObject already belongs to a Pool");
+            }
+
+            pooledObject.OwnerPool = this;
+            pooledObject.PoolOrder = _nextObjectOrder++;
+            pooledObject.AvailableHeapIndex = -1;
+            pooledObject.AvailabilityReserved = false;
+
+            if (!pooledObject.Used)
+            {
+                AddAvailable(pooledObject);
+            }
+        }
+
+        private void DetachPooledObject(PooledGameObject pooledObject)
+        {
+            if (pooledObject == null || !ReferenceEquals(pooledObject.OwnerPool, this))
+            {
+                return;
+            }
+
+            pooledObject.OwnerPool = null;
+            pooledObject.AvailableHeapIndex = -1;
+            pooledObject.AvailabilityReserved = false;
+        }
+
+        private void AddAvailable(PooledGameObject pooledObject)
+        {
+            var index = _availableObjects.Count;
+            _availableObjects.Add(pooledObject);
+            pooledObject.AvailableHeapIndex = index;
+            SiftAvailableUp(index);
+        }
+
+        private bool RemoveAvailable(PooledGameObject pooledObject)
+        {
+            var index = pooledObject?.AvailableHeapIndex ?? -1;
+
+            if (index < 0 ||
+                index >= _availableObjects.Count ||
+                !ReferenceEquals(_availableObjects[index], pooledObject))
+            {
+                return false;
+            }
+
+            RemoveAvailableAt(index);
+            return true;
+        }
+
+        private void RemoveAvailableAt(int index)
+        {
+            var lastIndex = _availableObjects.Count - 1;
+            var removedObject = _availableObjects[index];
+            var lastObject = _availableObjects[lastIndex];
+            _availableObjects.RemoveAt(lastIndex);
+            removedObject.AvailableHeapIndex = -1;
+
+            if (index == lastIndex)
+            {
+                return;
+            }
+
+            _availableObjects[index] = lastObject;
+            lastObject.AvailableHeapIndex = index;
+
+            var parentIndex = (index - 1) / 2;
+
+            if (index > 0 &&
+                _availableObjects[index].PoolOrder < _availableObjects[parentIndex].PoolOrder)
+            {
+                SiftAvailableUp(index);
+            }
+            else
+            {
+                SiftAvailableDown(index);
+            }
+        }
+
+        private void SiftAvailableUp(int index)
+        {
+            while (index > 0)
+            {
+                var parentIndex = (index - 1) / 2;
+
+                if (_availableObjects[parentIndex].PoolOrder <= _availableObjects[index].PoolOrder)
+                {
+                    return;
+                }
+
+                SwapAvailable(index, parentIndex);
+                index = parentIndex;
+            }
+        }
+
+        private void SiftAvailableDown(int index)
+        {
+            while (true)
+            {
+                var leftIndex = (index * 2) + 1;
+
+                if (leftIndex >= _availableObjects.Count)
+                {
+                    return;
+                }
+
+                var rightIndex = leftIndex + 1;
+                var smallestIndex = rightIndex < _availableObjects.Count &&
+                    _availableObjects[rightIndex].PoolOrder < _availableObjects[leftIndex].PoolOrder
+                        ? rightIndex
+                        : leftIndex;
+
+                if (_availableObjects[index].PoolOrder <= _availableObjects[smallestIndex].PoolOrder)
+                {
+                    return;
+                }
+
+                SwapAvailable(index, smallestIndex);
+                index = smallestIndex;
+            }
+        }
+
+        private void SwapAvailable(int firstIndex, int secondIndex)
+        {
+            var first = _availableObjects[firstIndex];
+            var second = _availableObjects[secondIndex];
+            _availableObjects[firstIndex] = second;
+            _availableObjects[secondIndex] = first;
+            first.AvailableHeapIndex = secondIndex;
+            second.AvailableHeapIndex = firstIndex;
         }
     }
     
@@ -803,6 +1109,10 @@ namespace VolumeBox.Toolbox
     {
         public GameObject GameObject;
         public bool Used;
+        internal Pool OwnerPool;
+        internal int PoolOrder;
+        internal int AvailableHeapIndex = -1;
+        internal bool AvailabilityReserved;
         // Lifecycle metadata captures creation-time hierarchy order; runtime changes are intentionally not rescanned.
         internal PooledSpawnHandler[] SpawnHandlers = Array.Empty<PooledSpawnHandler>();
         internal IDespawn[] DespawnHandlers = Array.Empty<IDespawn>();

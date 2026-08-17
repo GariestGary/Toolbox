@@ -8,10 +8,11 @@ namespace VolumeBox.Toolbox
     {
         private readonly Dictionary<Type, List<Subscriber>> _subscribersByType = new();
         private readonly List<Subscriber> _pendingAdditions = new();
-        private readonly List<Subscriber> _pendingRemovals = new();
+        private readonly HashSet<Subscriber> _pendingRemovals = new();
         private readonly Dictionary<Type, Message> _MessagesCache = new();
         private Pooler _Pool;
         private int _dispatchDepth;
+        private readonly HashSet<Type> _pendingRemovalTypes = new();
 
 #if TOOLBOX_DEBUG
 
@@ -85,9 +86,9 @@ namespace VolumeBox.Toolbox
                 {
                     var subscriber = subscribers[i];
 
-                    if (!subscriber.Keep && !_pendingRemovals.Contains(subscriber))
+                    if (!subscriber.Keep)
                     {
-                        _pendingRemovals.Add(subscriber);
+                        QueueActiveSubscriberRemoval(pair.Key, subscriber);
                     }
                 }
             }
@@ -116,6 +117,31 @@ namespace VolumeBox.Toolbox
                 return;
             }
 
+            QueueSubscriberRemoval(subscriber);
+        }
+
+        public void RemoveSubscribers(IEnumerable<Subscriber> subscribers)
+        {
+            try
+            {
+                foreach (var subscriber in subscribers)
+                {
+                    QueueSubscriberRemoval(subscriber);
+                }
+            }
+            finally
+            {
+                ApplyPendingMutationsIfPossible();
+            }
+        }
+
+        private void QueueSubscriberRemoval(Subscriber subscriber)
+        {
+            if (subscriber == null || subscriber.Type == null)
+            {
+                return;
+            }
+
             var pendingAdditionIndex = _pendingAdditions.IndexOf(subscriber);
 
             if (pendingAdditionIndex >= 0)
@@ -124,21 +150,19 @@ namespace VolumeBox.Toolbox
                 return;
             }
 
-            if (!_subscribersByType.TryGetValue(subscriber.Type, out var subscribers) ||
-                !subscribers.Contains(subscriber) ||
-                _pendingRemovals.Contains(subscriber))
+            if (!_pendingRemovals.Add(subscriber))
             {
                 return;
             }
 
-            _pendingRemovals.Add(subscriber);
+            _pendingRemovalTypes.Add(subscriber.Type);
         }
 
-        public void RemoveSubscribers(IEnumerable<Subscriber> subscribers)
+        private void QueueActiveSubscriberRemoval(Type type, Subscriber subscriber)
         {
-            foreach (var subscriber in subscribers)
+            if (_pendingRemovals.Add(subscriber))
             {
-                RemoveSubscriber(subscriber);
+                _pendingRemovalTypes.Add(type);
             }
         }
 
@@ -286,6 +310,7 @@ namespace VolumeBox.Toolbox
                 _subscribersByType.Clear();
                 _pendingAdditions.Clear();
                 _pendingRemovals.Clear();
+                _pendingRemovalTypes.Clear();
                 return;
             }
 
@@ -297,10 +322,7 @@ namespace VolumeBox.Toolbox
                 {
                     var subscriber = subscribers[i];
 
-                    if (!_pendingRemovals.Contains(subscriber))
-                    {
-                        _pendingRemovals.Add(subscriber);
-                    }
+                    QueueActiveSubscriberRemoval(pair.Key, subscriber);
                 }
             }
 
@@ -351,12 +373,45 @@ namespace VolumeBox.Toolbox
                 return;
             }
 
-            for (var i = 0; i < _pendingRemovals.Count; i++)
+            foreach (var type in _pendingRemovalTypes)
             {
-                RemoveSubscriberImmediate(_pendingRemovals[i]);
+                if (!_subscribersByType.TryGetValue(type, out var subscribers))
+                {
+                    continue;
+                }
+
+                var writeIndex = 0;
+
+                for (var readIndex = 0; readIndex < subscribers.Count; readIndex++)
+                {
+                    var subscriber = subscribers[readIndex];
+
+                    if (_pendingRemovals.Contains(subscriber))
+                    {
+                        continue;
+                    }
+
+                    if (writeIndex != readIndex)
+                    {
+                        subscribers[writeIndex] = subscriber;
+                    }
+
+                    writeIndex++;
+                }
+
+                if (writeIndex < subscribers.Count)
+                {
+                    subscribers.RemoveRange(writeIndex, subscribers.Count - writeIndex);
+                }
+
+                if (subscribers.Count == 0)
+                {
+                    _subscribersByType.Remove(type);
+                }
             }
 
             _pendingRemovals.Clear();
+            _pendingRemovalTypes.Clear();
 
             for (var i = 0; i < _pendingAdditions.Count; i++)
             {

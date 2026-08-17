@@ -1,6 +1,7 @@
 using NUnit.Framework;
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.TestTools;
 
@@ -138,6 +139,55 @@ namespace VolumeBox.Toolbox.Tests
         }
 
         [Test]
+        public void SingleRemovalOutsideDispatchRemovesOnlyRequestedSubscriber()
+        {
+            var gameObject = new GameObject("Messenger single removal test");
+            var messenger = gameObject.AddComponent<Messenger>();
+            var removedCount = 0;
+            var remainingCount = 0;
+            var removedSubscriber = messenger.Subscribe<MockMessage>(_ => removedCount++);
+            messenger.Subscribe<MockMessage>(_ => remainingCount++);
+
+            messenger.RemoveSubscriber(removedSubscriber);
+            messenger.RemoveSubscriber(removedSubscriber);
+            messenger.Send(new MockMessage());
+
+            Assert.AreEqual(0, removedCount);
+            Assert.AreEqual(1, remainingCount);
+            UnityEngine.Object.DestroyImmediate(gameObject);
+        }
+
+        [Test]
+        public void BatchRemovalPreservesStableSurvivorOrderAndToleratesDuplicateUnknownAndNullEntries()
+        {
+            var gameObject = new GameObject("Messenger batch removal test");
+            var messenger = gameObject.AddComponent<Messenger>();
+            var order = new List<string>();
+            messenger.Subscribe<MockMessage>(_ => order.Add("A"));
+            var subscriberB = messenger.Subscribe<MockMessage>(_ => order.Add("B"));
+            messenger.Subscribe<MockMessage>(_ => order.Add("C"));
+            var subscriberD = messenger.Subscribe<MockMessage>(_ => order.Add("D"));
+            messenger.Subscribe<MockMessage>(_ => order.Add("E"));
+            var unknownSubscriber = new Subscriber(typeof(MockMessage), _ => { });
+            var typelessSubscriber = new Subscriber(null, _ => { });
+
+            messenger.RemoveSubscribers(new[]
+            {
+                subscriberB,
+                subscriberD,
+                subscriberB,
+                unknownSubscriber,
+                typelessSubscriber,
+                null
+            });
+            messenger.RemoveSubscribers(new[] { subscriberB, unknownSubscriber, null });
+            messenger.Send(new MockMessage());
+
+            CollectionAssert.AreEqual(new[] { "A", "C", "E" }, order);
+            UnityEngine.Object.DestroyImmediate(gameObject);
+        }
+
+        [Test]
         public void SubscriberCanRemoveItselfDuringDispatch()
         {
             var gameObject = new GameObject("Messenger self removal test");
@@ -186,6 +236,58 @@ namespace VolumeBox.Toolbox.Tests
         }
 
         [Test]
+        public void MultipleRemovalsDuringDispatchPreserveCurrentSnapshotAndStableOrder()
+        {
+            var gameObject = new GameObject("Messenger deferred batch removal test");
+            var messenger = gameObject.AddComponent<Messenger>();
+            var order = new List<string>();
+            Subscriber subscriberB = null;
+            Subscriber subscriberD = null;
+
+            messenger.Subscribe<MockMessage>(_ =>
+            {
+                order.Add("A");
+                messenger.RemoveSubscribers(new[] { subscriberB, subscriberD, subscriberB });
+            });
+            subscriberB = messenger.Subscribe<MockMessage>(_ => order.Add("B"));
+            messenger.Subscribe<MockMessage>(_ => order.Add("C"));
+            subscriberD = messenger.Subscribe<MockMessage>(_ => order.Add("D"));
+            messenger.Subscribe<MockMessage>(_ => order.Add("E"));
+
+            messenger.Send(new MockMessage());
+            messenger.Send(new MockMessage());
+
+            CollectionAssert.AreEqual(
+                new[] { "A", "B", "C", "D", "E", "A", "C", "E" },
+                order);
+            UnityEngine.Object.DestroyImmediate(gameObject);
+        }
+
+        [Test]
+        public void PendingRemovalIsAppliedAndExceptionIsRethrownWhenCallbackThrows()
+        {
+            var gameObject = new GameObject("Messenger exceptional dispatch test");
+            var messenger = gameObject.AddComponent<Messenger>();
+            var removedCount = 0;
+            Subscriber subscriberToRemove = null;
+
+            var throwingSubscriber = messenger.Subscribe<MockMessage>(_ =>
+            {
+                messenger.RemoveSubscriber(subscriberToRemove);
+                throw new InvalidOperationException("Expected test exception");
+            });
+            subscriberToRemove = messenger.Subscribe<MockMessage>(_ => removedCount++);
+
+            Assert.Throws<InvalidOperationException>(() => messenger.Send(new MockMessage()));
+
+            messenger.RemoveSubscriber(throwingSubscriber);
+            messenger.Send(new MockMessage());
+
+            Assert.AreEqual(0, removedCount);
+            UnityEngine.Object.DestroyImmediate(gameObject);
+        }
+
+        [Test]
         public void SubscriberAddedDuringDispatchStartsWithNextSend()
         {
             var gameObject = new GameObject("Messenger deferred subscription test");
@@ -206,6 +308,33 @@ namespace VolumeBox.Toolbox.Tests
 
             messenger.Send(new MockMessage());
             Assert.AreEqual(1, addedCount);
+            UnityEngine.Object.DestroyImmediate(gameObject);
+        }
+
+        [Test]
+        public void SubscriberAddedAndRemovedDuringDispatchIsNeverApplied()
+        {
+            var gameObject = new GameObject("Messenger cancelled deferred subscription test");
+            var messenger = gameObject.AddComponent<Messenger>();
+            var addedCount = 0;
+            var attemptedAddition = false;
+
+            messenger.Subscribe<MockMessage>(_ =>
+            {
+                if (attemptedAddition)
+                {
+                    return;
+                }
+
+                attemptedAddition = true;
+                var addedSubscriber = messenger.Subscribe<MockMessage>(_ => addedCount++);
+                messenger.RemoveSubscriber(addedSubscriber);
+            });
+
+            messenger.Send(new MockMessage());
+            messenger.Send(new MockMessage());
+
+            Assert.AreEqual(0, addedCount);
             UnityEngine.Object.DestroyImmediate(gameObject);
         }
 
@@ -268,6 +397,54 @@ namespace VolumeBox.Toolbox.Tests
             Assert.AreEqual(1, regularCount);
             Assert.AreEqual(2, keepCount);
             UnityEngine.Object.DestroyImmediate(gameObject);
+        }
+
+        [Test]
+        public void ClearDuringDispatchPreservesSnapshotThenRemovesAllSubscribers()
+        {
+            var gameObject = new GameObject("Messenger deferred clear test");
+            var messenger = gameObject.AddComponent<Messenger>();
+            var clearingCount = 0;
+            var regularCount = 0;
+            var keepCount = 0;
+
+            messenger.Subscribe<MockMessage>(_ =>
+            {
+                clearingCount++;
+                messenger.Clear();
+            });
+            messenger.Subscribe<MockMessage>(_ => regularCount++);
+            messenger.Subscribe<MockMessage>(_ => keepCount++, keep: true);
+
+            messenger.Send(new MockMessage());
+            messenger.Send(new MockMessage());
+
+            Assert.AreEqual(1, clearingCount);
+            Assert.AreEqual(1, regularCount);
+            Assert.AreEqual(1, keepCount);
+            UnityEngine.Object.DestroyImmediate(gameObject);
+        }
+
+        [Test]
+        public void SceneBoundMassCleanupRemovesAllMatchingSubscribers()
+        {
+            const int subscriberCount = 100;
+            var messenger = Toolbox.Messenger;
+            var binding = new GameObject("Messenger scene cleanup binding");
+            var invocationCount = 0;
+            messenger.ClearSubscribers();
+
+            for (var i = 0; i < subscriberCount; i++)
+            {
+                messenger.Subscribe<MockMessage>(_ => invocationCount++, binding);
+            }
+
+            messenger.Send(new SceneUnloadedMessage(binding.scene.name));
+            messenger.Send(new MockMessage());
+
+            Assert.AreEqual(0, invocationCount);
+            messenger.ClearSubscribers();
+            UnityEngine.Object.DestroyImmediate(binding);
         }
 
         [UnityTest, PrebuildSetup(typeof(TestPrebuild))]

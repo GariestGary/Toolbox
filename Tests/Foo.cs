@@ -13,7 +13,9 @@ namespace VolumeBox.Toolbox.Tests
         public int ReadyCount { get; private set; }
         public string LifecycleId { get; set; }
         public List<string> LifecycleEvents { get; set; }
+        public List<string> TickEvents { get; set; }
         public System.Action RiseAction { get; set; }
+        public System.Action TickAction { get; set; }
         public float counter = 0;
 
         protected override void Rise()
@@ -32,6 +34,8 @@ namespace VolumeBox.Toolbox.Tests
         protected override void Tick()
         {
             TickCount++;
+            TickEvents?.Add(LifecycleId);
+            TickAction?.Invoke();
             counter += delta;
         }
     }

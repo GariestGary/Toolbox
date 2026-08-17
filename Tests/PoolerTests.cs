@@ -22,6 +22,10 @@ namespace VolumeBox.Toolbox.Tests
             "pools",
             BindingFlags.Instance | BindingFlags.NonPublic);
 
+        private static readonly FieldInfo AvailableObjectsField = typeof(Pool).GetField(
+            "_availableObjects",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
         private int spawnCount;
 
         [Test]
@@ -41,6 +45,733 @@ namespace VolumeBox.Toolbox.Tests
             {
                 Object.DestroyImmediate(objectToDespawn);
                 Object.DestroyImmediate(poolerObject);
+            }
+        }
+
+        [Test]
+        public void InitialAvailabilitySpawnsDistinctObjectsInPoolOrder()
+        {
+            const string poolTag = "Availability Initial Order";
+            var prefab = new GameObject("Availability Initial Order Prefab");
+
+            try
+            {
+                var pool = Toolbox.Pooler.TryAddPool(poolTag, prefab, 3);
+                var expected = new[]
+                {
+                    pool.objects[0].GameObject,
+                    pool.objects[1].GameObject,
+                    pool.objects[2].GameObject
+                };
+
+                AssertAvailableCount(pool, 3);
+
+                var spawned = new[]
+                {
+                    Toolbox.Pooler.Spawn(poolTag),
+                    Toolbox.Pooler.Spawn(poolTag),
+                    Toolbox.Pooler.Spawn(poolTag)
+                };
+
+                CollectionAssert.AreEqual(expected, spawned);
+                CollectionAssert.AllItemsAreUnique(spawned);
+                AssertAvailableCount(pool, 0);
+
+                for (int i = 0; i < pool.objects.Count; i++)
+                {
+                    Assert.IsTrue(pool.objects[i].Used);
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(prefab);
+            }
+        }
+
+        [Test]
+        public void ExhaustedPoolExpandsOnceAndReusesExpandedObject()
+        {
+            const string poolTag = "Availability Runtime Expansion";
+            var prefab = new GameObject("Availability Runtime Expansion Prefab");
+
+            try
+            {
+                var pool = Toolbox.Pooler.TryAddPool(poolTag, prefab, 2);
+                Toolbox.Pooler.Spawn(poolTag);
+                Toolbox.Pooler.Spawn(poolTag);
+                AssertAvailableCount(pool, 0);
+
+                var expandedObject = Toolbox.Pooler.Spawn(poolTag);
+
+                Assert.AreEqual(3, pool.objects.Count);
+                Assert.AreSame(pool.objects[2].GameObject, expandedObject);
+                AssertAvailableCount(pool, 0);
+
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(expandedObject));
+                AssertAvailableCount(pool, 1);
+                Assert.AreSame(expandedObject, Toolbox.Pooler.Spawn(poolTag));
+                Assert.AreEqual(3, pool.objects.Count);
+            }
+            finally
+            {
+                Object.DestroyImmediate(prefab);
+            }
+        }
+
+        [Test]
+        public void DespawnPreservesEarliestObjectReuseOrder()
+        {
+            const string poolTag = "Availability Earliest Reuse";
+            var prefab = new GameObject("Availability Earliest Reuse Prefab");
+
+            try
+            {
+                var pool = Toolbox.Pooler.TryAddPool(poolTag, prefab, 3);
+                var firstObject = Toolbox.Pooler.Spawn(poolTag);
+                Toolbox.Pooler.Spawn(poolTag);
+
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(firstObject));
+                AssertAvailableCount(pool, 2);
+                Assert.AreSame(firstObject, Toolbox.Pooler.Spawn(poolTag));
+            }
+            finally
+            {
+                Object.DestroyImmediate(prefab);
+            }
+        }
+
+        [Test]
+        public void ArbitraryDespawnOrderStillReusesEarliestPoolEntriesFirst()
+        {
+            const string poolTag = "Availability Arbitrary Reuse";
+            var prefab = new GameObject("Availability Arbitrary Reuse Prefab");
+
+            try
+            {
+                var pool = Toolbox.Pooler.TryAddPool(poolTag, prefab, 4);
+                var spawned = new GameObject[4];
+
+                for (int i = 0; i < spawned.Length; i++)
+                {
+                    spawned[i] = Toolbox.Pooler.Spawn(poolTag);
+                }
+
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(spawned[2]));
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(spawned[0]));
+                AssertAvailableCount(pool, 2);
+                Assert.AreSame(spawned[0], Toolbox.Pooler.Spawn(poolTag));
+                Assert.AreSame(spawned[2], Toolbox.Pooler.Spawn(poolTag));
+            }
+            finally
+            {
+                Object.DestroyImmediate(prefab);
+            }
+        }
+
+        [Test]
+        public void DuplicateDespawnDoesNotDuplicateAvailabilityEntry()
+        {
+            const string poolTag = "Availability Duplicate Despawn";
+            var prefab = new GameObject("Availability Duplicate Despawn Prefab");
+
+            try
+            {
+                var pool = Toolbox.Pooler.TryAddPool(poolTag, prefab, 1);
+                var firstObject = Toolbox.Pooler.Spawn(poolTag);
+
+                AssertAvailableCount(pool, 0);
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(firstObject));
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(firstObject));
+                AssertAvailableCount(pool, 1);
+
+                Assert.AreSame(firstObject, Toolbox.Pooler.Spawn(poolTag));
+                AssertAvailableCount(pool, 0);
+
+                var expandedObject = Toolbox.Pooler.Spawn(poolTag);
+
+                Assert.AreEqual(2, pool.objects.Count);
+                Assert.AreNotSame(firstObject, expandedObject);
+            }
+            finally
+            {
+                Object.DestroyImmediate(prefab);
+            }
+        }
+
+        [Test]
+        public void AvailabilityIsIsolatedBetweenDifferentPoolTags()
+        {
+            const string firstTag = "Availability Isolated First";
+            const string secondTag = "Availability Isolated Second";
+            var firstPrefab = new GameObject("Availability Isolated First Prefab");
+            var secondPrefab = new GameObject("Availability Isolated Second Prefab");
+
+            try
+            {
+                var firstPool = Toolbox.Pooler.TryAddPool(firstTag, firstPrefab, 1);
+                var secondPool = Toolbox.Pooler.TryAddPool(secondTag, secondPrefab, 1);
+                var firstObject = Toolbox.Pooler.Spawn(firstTag);
+
+                AssertAvailableCount(firstPool, 0);
+                AssertAvailableCount(secondPool, 1);
+                Assert.AreSame(secondPool.objects[0].GameObject, Toolbox.Pooler.Spawn(secondTag));
+                AssertAvailableCount(secondPool, 0);
+
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(firstObject));
+                AssertAvailableCount(firstPool, 1);
+                AssertAvailableCount(secondPool, 0);
+            }
+            finally
+            {
+                Object.DestroyImmediate(firstPrefab);
+                Object.DestroyImmediate(secondPrefab);
+            }
+        }
+
+        [Test]
+        public void PoolsSharingTagKeepIndependentAvailability()
+        {
+            const string sharedTag = "Availability Shared Tag";
+            var firstPrefab = new GameObject("Availability Shared First Prefab");
+            var secondPrefab = new GameObject("Availability Shared Second Prefab");
+            var previousRandomState = Random.state;
+
+            try
+            {
+                var firstPool = Toolbox.Pooler.TryAddPool(sharedTag, firstPrefab, 1);
+                var secondPool = Toolbox.Pooler.TryAddPool(sharedTag, secondPrefab, 1);
+
+                Random.InitState(FindRandomSeedForIndex(2, 0));
+                var firstObject = Toolbox.Pooler.Spawn(sharedTag);
+
+                Assert.AreSame(firstPool.objects[0].GameObject, firstObject);
+                AssertAvailableCount(firstPool, 0);
+                AssertAvailableCount(secondPool, 1);
+
+                Random.InitState(FindRandomSeedForIndex(2, 1));
+                var secondObject = Toolbox.Pooler.Spawn(sharedTag);
+
+                Assert.AreSame(secondPool.objects[0].GameObject, secondObject);
+                AssertAvailableCount(firstPool, 0);
+                AssertAvailableCount(secondPool, 0);
+            }
+            finally
+            {
+                Random.state = previousRandomState;
+                Object.DestroyImmediate(firstPrefab);
+                Object.DestroyImmediate(secondPrefab);
+            }
+        }
+
+        [Test]
+        public void ReentrantSpawnActionCannotAcquireReservedObject()
+        {
+            const string poolTag = "Availability Reentrant Spawn Action";
+            var prefab = new GameObject("Availability Reentrant Spawn Action Prefab");
+            GameObject nestedObject = null;
+            var spawnNested = true;
+
+            try
+            {
+                var pool = Toolbox.Pooler.TryAddPool(
+                    poolTag,
+                    prefab,
+                    2,
+                    spawnAction: _ =>
+                    {
+                        if (!spawnNested)
+                        {
+                            return;
+                        }
+
+                        spawnNested = false;
+                        nestedObject = Toolbox.Pooler.Spawn(poolTag);
+                    });
+
+                var outerObject = Toolbox.Pooler.Spawn(poolTag);
+
+                Assert.IsNotNull(nestedObject);
+                Assert.AreNotSame(outerObject, nestedObject);
+                Assert.AreEqual(2, pool.objects.Count);
+                AssertAvailableCount(pool, 0);
+                AssertPooledState(outerObject, true, true);
+                AssertPooledState(nestedObject, true, true);
+            }
+            finally
+            {
+                Object.DestroyImmediate(prefab);
+            }
+        }
+
+        [Test]
+        public void ReentrantOnSpawnCannotAcquireReservedObject()
+        {
+            const string poolTag = "Availability Reentrant OnSpawn";
+            var prefab = new GameObject("Availability Reentrant OnSpawn Prefab");
+            prefab.AddComponent<ReentrantPooledObj>();
+            GameObject nestedObject = null;
+            var spawnNested = true;
+
+            try
+            {
+                var pool = Toolbox.Pooler.TryAddPool(poolTag, prefab, 2);
+                ReentrantPooledObj.SpawnAction = () =>
+                {
+                    if (!spawnNested)
+                    {
+                        return;
+                    }
+
+                    spawnNested = false;
+                    nestedObject = Toolbox.Pooler.Spawn(poolTag);
+                };
+
+                var outerObject = Toolbox.Pooler.Spawn(poolTag);
+
+                Assert.IsNotNull(nestedObject);
+                Assert.AreNotSame(outerObject, nestedObject);
+                Assert.AreEqual(2, pool.objects.Count);
+                AssertAvailableCount(pool, 0);
+                AssertPooledState(outerObject, true, true);
+                AssertPooledState(nestedObject, true, true);
+            }
+            finally
+            {
+                ReentrantPooledObj.SpawnAction = null;
+                Object.DestroyImmediate(prefab);
+            }
+        }
+
+        [Test]
+        public void GarbageCollectorDoesNotRemoveObjectReservedBySpawnCallback()
+        {
+            const string poolTag = "Availability Reentrant Garbage Collection";
+            var prefab = new GameObject("Availability Reentrant Garbage Collection Prefab");
+            var runGarbageCollector = false;
+
+            try
+            {
+                var pool = Toolbox.Pooler.TryAddPool(
+                    poolTag,
+                    prefab,
+                    1,
+                    spawnAction: _ =>
+                    {
+                        if (runGarbageCollector)
+                        {
+                            Toolbox.Pooler.ForceGarbageCollector();
+                        }
+                    });
+                var firstObject = Toolbox.Pooler.Spawn(poolTag);
+                var secondObject = Toolbox.Pooler.Spawn(poolTag);
+
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(firstObject));
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(secondObject));
+                AssertAvailableCount(pool, 2);
+
+                runGarbageCollector = true;
+                var spawnedObject = Toolbox.Pooler.Spawn(poolTag);
+
+                Assert.AreSame(firstObject, spawnedObject);
+                Assert.AreEqual(2, pool.objects.Count);
+                AssertAvailableCount(pool, 1);
+                AssertPooledState(spawnedObject, true, true);
+            }
+            finally
+            {
+                Object.DestroyImmediate(prefab);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void SpawnCallbackExceptionRestoresAvailability(bool throwFromOnSpawn)
+        {
+            const string poolTag = "Availability Callback Exception";
+            var prefab = new GameObject("Availability Callback Exception Prefab");
+            var shouldThrow = true;
+
+            if (throwFromOnSpawn)
+            {
+                prefab.AddComponent<ReentrantPooledObj>();
+            }
+
+            try
+            {
+                System.Action throwIfRequested = () =>
+                {
+                    if (shouldThrow)
+                    {
+                        throw new System.InvalidOperationException("Expected spawn callback failure");
+                    }
+                };
+
+                var pool = Toolbox.Pooler.TryAddPool(
+                    poolTag,
+                    prefab,
+                    1,
+                    spawnAction: throwFromOnSpawn ? null : _ => throwIfRequested());
+
+                if (throwFromOnSpawn)
+                {
+                    ReentrantPooledObj.SpawnAction = throwIfRequested;
+                }
+
+                Assert.Throws<System.InvalidOperationException>(() => Toolbox.Pooler.Spawn(poolTag));
+                AssertAvailableCount(pool, 1);
+                Assert.IsFalse(pool.objects[0].Used);
+
+                shouldThrow = false;
+                Assert.AreSame(pool.objects[0].GameObject, Toolbox.Pooler.Spawn(poolTag));
+                AssertAvailableCount(pool, 0);
+                Assert.IsTrue(pool.objects[0].Used);
+            }
+            finally
+            {
+                ReentrantPooledObj.SpawnAction = null;
+                Object.DestroyImmediate(prefab);
+            }
+        }
+
+        [Test]
+        public void PooledObjectLookupTracksSpawnAndDespawnState()
+        {
+            const string poolTag = "Object Lookup Lifecycle";
+            var prefab = new GameObject("Object Lookup Lifecycle Prefab");
+            var nonPooledObject = new GameObject("Non-Pooled Object");
+
+            try
+            {
+                AssertPooledState(nonPooledObject, false, false);
+                Assert.IsFalse(Toolbox.Pooler.TryDespawn(nonPooledObject));
+
+                var pool = Toolbox.Pooler.TryAddPool(poolTag, prefab, 1);
+                var pooledObject = pool.objects[0].GameObject;
+
+                AssertPooledState(pooledObject, true, false);
+
+                var spawnedObject = Toolbox.Pooler.Spawn(poolTag);
+
+                Assert.AreSame(pooledObject, spawnedObject);
+                AssertPooledState(spawnedObject, true, true);
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(spawnedObject));
+                AssertPooledState(spawnedObject, true, false);
+
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(spawnedObject));
+                AssertPooledState(spawnedObject, true, false);
+            }
+            finally
+            {
+                Object.DestroyImmediate(nonPooledObject);
+                Object.DestroyImmediate(prefab);
+            }
+        }
+
+        [Test]
+        public void TryDespawnResolvesExactObjectAcrossDifferentPools()
+        {
+            const string firstTag = "Object Lookup First Pool";
+            const string secondTag = "Object Lookup Second Pool";
+            var firstPrefab = new GameObject("First Object Lookup Prefab");
+            var secondPrefab = new GameObject("Second Object Lookup Prefab");
+
+            try
+            {
+                Toolbox.Pooler.TryAddPool(firstTag, firstPrefab, 1);
+                Toolbox.Pooler.TryAddPool(secondTag, secondPrefab, 1);
+                var firstObject = Toolbox.Pooler.Spawn(firstTag);
+                var secondObject = Toolbox.Pooler.Spawn(secondTag);
+
+                AssertPooledState(firstObject, true, true);
+                AssertPooledState(secondObject, true, true);
+
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(secondObject));
+
+                AssertPooledState(firstObject, true, true);
+                AssertPooledState(secondObject, true, false);
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(firstObject));
+            }
+            finally
+            {
+                Object.DestroyImmediate(firstPrefab);
+                Object.DestroyImmediate(secondPrefab);
+            }
+        }
+
+        [Test]
+        public void TryDespawnResolvesExactObjectAcrossPoolsSharingTag()
+        {
+            const string sharedTag = "Object Lookup Shared Tag";
+            var firstPrefab = new GameObject("First Shared Lookup Prefab");
+            var secondPrefab = new GameObject("Second Shared Lookup Prefab");
+            var previousRandomState = Random.state;
+
+            try
+            {
+                var firstPool = Toolbox.Pooler.TryAddPool(sharedTag, firstPrefab, 1);
+                var secondPool = Toolbox.Pooler.TryAddPool(sharedTag, secondPrefab, 1);
+                var firstPooledObject = firstPool.objects[0];
+                var secondPooledObject = secondPool.objects[0];
+
+                Random.InitState(FindRandomSeedForIndex(2, 0));
+                Assert.AreSame(firstPooledObject.GameObject, Toolbox.Pooler.Spawn(sharedTag));
+                Random.InitState(FindRandomSeedForIndex(2, 1));
+                Assert.AreSame(secondPooledObject.GameObject, Toolbox.Pooler.Spawn(sharedTag));
+
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(secondPooledObject.GameObject));
+
+                AssertPooledState(firstPooledObject.GameObject, true, true);
+                AssertPooledState(secondPooledObject.GameObject, true, false);
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(firstPooledObject.GameObject));
+            }
+            finally
+            {
+                Random.state = previousRandomState;
+                Object.DestroyImmediate(firstPrefab);
+                Object.DestroyImmediate(secondPrefab);
+            }
+        }
+
+        [Test]
+        public void DuplicateGameObjectRegistrationThrowsInsteadOfOverwritingLookup()
+        {
+            const string poolTag = "Object Lookup Duplicate Registration";
+            var prefab = new GameObject("Duplicate Registration Prefab");
+            var sharedInstance = new GameObject("Duplicate Registration Instance");
+
+            try
+            {
+                Assert.Throws<System.ArgumentException>(() => Toolbox.Pooler.TryAddPool(
+                    poolTag,
+                    prefab,
+                    2,
+                    (obj, position, rotation, parent) => sharedInstance));
+
+                AssertPooledState(sharedInstance, false, false);
+                Assert.IsFalse(Toolbox.Pooler.TryDespawn(sharedInstance));
+            }
+            finally
+            {
+                if (sharedInstance != null)
+                {
+                    Object.DestroyImmediate(sharedInstance);
+                }
+
+                Object.DestroyImmediate(prefab);
+            }
+        }
+
+        [Test]
+        public void DuplicateRegistrationDoesNotReplaceExistingOwner()
+        {
+            const string ownerTag = "Object Lookup Existing Owner";
+            const string duplicateTag = "Object Lookup Duplicate Owner";
+            var ownerPrefab = new GameObject("Existing Owner Prefab");
+            var duplicatePrefab = new GameObject("Duplicate Owner Prefab");
+            var sharedInstance = new GameObject("Existing Owned Instance");
+
+            try
+            {
+                var ownerPool = Toolbox.Pooler.TryAddPool(
+                    ownerTag,
+                    ownerPrefab,
+                    1,
+                    (obj, position, rotation, parent) => sharedInstance);
+
+                Assert.AreSame(sharedInstance, ownerPool.objects[0].GameObject);
+                AssertPooledState(sharedInstance, true, false);
+
+                Assert.Throws<System.ArgumentException>(() => Toolbox.Pooler.TryAddPool(
+                    duplicateTag,
+                    duplicatePrefab,
+                    1,
+                    (obj, position, rotation, parent) => sharedInstance));
+
+                Assert.AreSame(sharedInstance, ownerPool.objects[0].GameObject);
+                AssertPooledState(sharedInstance, true, false);
+
+                var spawnedObject = Toolbox.Pooler.Spawn(ownerTag);
+
+                Assert.AreSame(sharedInstance, spawnedObject);
+                AssertPooledState(sharedInstance, true, true);
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(sharedInstance));
+                AssertPooledState(sharedInstance, true, false);
+            }
+            finally
+            {
+                if (sharedInstance != null)
+                {
+                    Object.DestroyImmediate(sharedInstance);
+                }
+
+                Object.DestroyImmediate(ownerPrefab);
+                Object.DestroyImmediate(duplicatePrefab);
+            }
+        }
+
+        [Test]
+        public void RemovedPoolObjectsAreRemovedFromObjectLookup()
+        {
+            const string poolTag = "Object Lookup Removed Pool";
+            var prefab = new GameObject("Removed Object Lookup Prefab");
+
+            try
+            {
+                var pool = Toolbox.Pooler.TryAddPool(poolTag, prefab, 1);
+                var spawnedObject = Toolbox.Pooler.Spawn(poolTag);
+
+                AssertAvailableCount(pool, 0);
+                AssertPooledState(spawnedObject, true, true);
+                Assert.IsTrue(Toolbox.Pooler.TryRemovePool(pool));
+                AssertAvailableCount(pool, 0);
+                AssertPooledState(spawnedObject, false, false);
+                Assert.IsFalse(Toolbox.Pooler.TryDespawn(spawnedObject));
+            }
+            finally
+            {
+                Object.DestroyImmediate(prefab);
+            }
+        }
+
+        [Test]
+        public void PoolRemovalKeepsObjectIndexedDuringDespawnedMessage()
+        {
+            const string poolTag = "Object Lookup Removal Message";
+            var prefab = new GameObject("Removal Message Lookup Prefab");
+            Subscriber subscriber = null;
+
+            try
+            {
+                var pool = Toolbox.Pooler.TryAddPool(poolTag, prefab, 1);
+                var spawnedObject = Toolbox.Pooler.Spawn(poolTag);
+                var messageObserved = false;
+                var stateDuringMessage = default(ObjectPooledState);
+
+                subscriber = Toolbox.Messenger.Subscribe<GameObjectRemovedMessage>(message =>
+                {
+                    if (message.RemoveType != GameObjectRemoveType.Despawned ||
+                        !ReferenceEquals(message.Obj, spawnedObject))
+                    {
+                        return;
+                    }
+
+                    messageObserved = true;
+                    stateDuringMessage = Toolbox.Pooler.IsObjectPooledAndUsed(spawnedObject);
+                }, keep: true);
+
+                Assert.IsTrue(Toolbox.Pooler.TryRemovePool(pool));
+                Assert.IsTrue(messageObserved);
+                Assert.IsTrue(stateDuringMessage.IsPooled);
+                Assert.IsFalse(stateDuringMessage.IsUsed);
+                AssertPooledState(spawnedObject, false, false);
+            }
+            finally
+            {
+                Toolbox.Messenger.RemoveSubscriber(subscriber);
+                Object.DestroyImmediate(prefab);
+            }
+        }
+
+        [Test]
+        public void GarbageCollectedObjectsAreRemovedFromObjectLookup()
+        {
+            const string poolTag = "Object Lookup Garbage Collection";
+            var prefab = new GameObject("Garbage Collected Lookup Prefab");
+            Subscriber subscriber = null;
+
+            try
+            {
+                var pool = Toolbox.Pooler.TryAddPool(poolTag, prefab, 1);
+                var firstObject = Toolbox.Pooler.Spawn(poolTag);
+                var secondObject = Toolbox.Pooler.Spawn(poolTag);
+                var retainedObject = Toolbox.Pooler.Spawn(poolTag);
+                var firstDestroyedMessageObserved = false;
+                var secondDestroyedMessageObserved = false;
+                var firstStateDuringMessage = default(ObjectPooledState);
+                var secondStateDuringMessage = default(ObjectPooledState);
+
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(firstObject));
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(secondObject));
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(retainedObject));
+                AssertAvailableCount(pool, 3);
+
+                subscriber = Toolbox.Messenger.Subscribe<GameObjectRemovedMessage>(message =>
+                {
+                    if (message.RemoveType != GameObjectRemoveType.Destroyed)
+                    {
+                        return;
+                    }
+
+                    if (ReferenceEquals(message.Obj, firstObject))
+                    {
+                        firstDestroyedMessageObserved = true;
+                        firstStateDuringMessage = Toolbox.Pooler.IsObjectPooledAndUsed(firstObject);
+                    }
+                    else if (ReferenceEquals(message.Obj, secondObject))
+                    {
+                        secondDestroyedMessageObserved = true;
+                        secondStateDuringMessage = Toolbox.Pooler.IsObjectPooledAndUsed(secondObject);
+                    }
+                }, keep: true);
+
+                Toolbox.Pooler.ForceGarbageCollector();
+
+                Assert.AreEqual(1, pool.objects.Count);
+                Assert.AreSame(retainedObject, pool.objects[0].GameObject);
+                AssertAvailableCount(pool, 1);
+                Assert.IsTrue(firstDestroyedMessageObserved);
+                Assert.IsTrue(secondDestroyedMessageObserved);
+                Assert.IsFalse(firstStateDuringMessage.IsPooled);
+                Assert.IsFalse(firstStateDuringMessage.IsUsed);
+                Assert.IsFalse(secondStateDuringMessage.IsPooled);
+                Assert.IsFalse(secondStateDuringMessage.IsUsed);
+                AssertPooledState(firstObject, false, false);
+                AssertPooledState(secondObject, false, false);
+                AssertPooledState(retainedObject, true, false);
+                Assert.IsFalse(Toolbox.Pooler.TryDespawn(firstObject));
+                Assert.IsFalse(Toolbox.Pooler.TryDespawn(secondObject));
+
+                var spawnedAfterGarbageCollection = Toolbox.Pooler.Spawn(poolTag);
+
+                Assert.AreSame(retainedObject, spawnedAfterGarbageCollection);
+                AssertAvailableCount(pool, 0);
+                AssertPooledState(retainedObject, true, true);
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(retainedObject));
+                AssertAvailableCount(pool, 1);
+            }
+            finally
+            {
+                Toolbox.Messenger.RemoveSubscriber(subscriber);
+                Object.DestroyImmediate(prefab);
+            }
+        }
+
+        [Test]
+        public void TryDespawnPreservesNestedIndependentlyPooledChildBehavior()
+        {
+            const string parentTag = "Object Lookup Nested Parent";
+            const string childTag = "Object Lookup Nested Child";
+            var parentPrefab = new GameObject("Nested Parent Lookup Prefab");
+            var childPrefab = new GameObject("Nested Child Lookup Prefab");
+
+            try
+            {
+                Toolbox.Pooler.TryAddPool(parentTag, parentPrefab, 1);
+                Toolbox.Pooler.TryAddPool(childTag, childPrefab, 1);
+                var parentObject = Toolbox.Pooler.Spawn(parentTag);
+                var childObject = Toolbox.Pooler.Spawn(childTag, parent: parentObject.transform);
+
+                Assert.AreSame(parentObject.transform, childObject.transform.parent);
+                Assert.IsTrue(Toolbox.Pooler.TryDespawn(parentObject));
+                AssertPooledState(parentObject, true, false);
+                AssertPooledState(childObject, true, false);
+                Assert.IsFalse(parentObject.activeSelf);
+                Assert.IsFalse(childObject.activeSelf);
+            }
+            finally
+            {
+                Object.DestroyImmediate(parentPrefab);
+                Object.DestroyImmediate(childPrefab);
             }
         }
 
@@ -149,12 +880,17 @@ namespace VolumeBox.Toolbox.Tests
             const string freshTag = "Lookup Fresh Pool";
             var stalePrefab = new GameObject("Stale Pool Prefab");
             var freshPrefab = new GameObject("Fresh Pool Prefab");
-            Toolbox.Pooler.TryAddPool(staleTag, stalePrefab, 1);
+            var stalePool = Toolbox.Pooler.TryAddPool(staleTag, stalePrefab, 1);
+            var staleObject = stalePool.objects[0].GameObject;
+            AssertAvailableCount(stalePool, 1);
 
             Toolbox.Pooler.Clear();
 
             Assert.AreEqual(0, GetPoolsByTag(Toolbox.Pooler).Count);
             Assert.AreEqual(0, GetPoolsWithNullTag(Toolbox.Pooler).Count);
+            AssertAvailableCount(stalePool, 0);
+            AssertPooledState(staleObject, false, false);
+            Assert.IsFalse(Toolbox.Pooler.TryDespawn(staleObject));
             LogAssert.Expect(LogType.Warning, $"Object pool with tag '{staleTag}' doesn't exists");
             Assert.IsNull(Toolbox.Pooler.Spawn(staleTag));
 
@@ -162,10 +898,17 @@ namespace VolumeBox.Toolbox.Tests
             Toolbox.Pooler.DisableGC();
 
             Assert.IsFalse(GetPoolsByTag(Toolbox.Pooler).ContainsKey(staleTag));
+            AssertPooledState(staleObject, false, false);
 
             var freshPool = Toolbox.Pooler.TryAddPool(freshTag, freshPrefab, 1);
 
-            Assert.AreSame(freshPool.objects[0].GameObject, Toolbox.Pooler.Spawn(freshTag));
+            var freshObject = Toolbox.Pooler.Spawn(freshTag);
+
+            Assert.AreSame(freshPool.objects[0].GameObject, freshObject);
+            AssertAvailableCount(freshPool, 0);
+            AssertPooledState(freshObject, true, true);
+            Assert.IsTrue(Toolbox.Pooler.TryDespawn(freshObject));
+            AssertAvailableCount(freshPool, 1);
             Object.DestroyImmediate(stalePrefab);
             Object.DestroyImmediate(freshPrefab);
         }
@@ -278,6 +1021,47 @@ namespace VolumeBox.Toolbox.Tests
         private static List<Pool> GetPools(Pooler pooler)
         {
             return (List<Pool>)PoolsField.GetValue(pooler);
+        }
+
+        private static void AssertPooledState(GameObject obj, bool isPooled, bool isUsed)
+        {
+            var state = Toolbox.Pooler.IsObjectPooledAndUsed(obj);
+
+            Assert.AreEqual(isPooled, state.IsPooled);
+            Assert.AreEqual(isUsed, state.IsUsed);
+        }
+
+        private static void AssertAvailableCount(Pool pool, int expectedCount)
+        {
+            Assert.IsNotNull(AvailableObjectsField);
+            var availableObjects = AvailableObjectsField.GetValue(pool) as List<PooledGameObject>;
+            Assert.IsNotNull(availableObjects);
+            Assert.AreEqual(expectedCount, availableObjects.Count);
+        }
+
+        private static int FindRandomSeedForIndex(int count, int expectedIndex)
+        {
+            var previousState = Random.state;
+
+            try
+            {
+                for (int seed = 0; seed < 10_000; seed++)
+                {
+                    Random.InitState(seed);
+
+                    if (Random.Range(0, count) == expectedIndex)
+                    {
+                        return seed;
+                    }
+                }
+            }
+            finally
+            {
+                Random.state = previousState;
+            }
+
+            throw new System.InvalidOperationException(
+                $"Could not find a deterministic Random seed for index {expectedIndex}");
         }
 
         [Test]
@@ -590,8 +1374,11 @@ namespace VolumeBox.Toolbox.Tests
 
             Assert.AreEqual(2, pool.objects.Count);
             Assert.AreNotSame(firstSpawn, expandedSpawn);
+            AssertPooledState(expandedSpawn, true, true);
             Assert.IsTrue(Toolbox.Pooler.TryDespawn(expandedSpawn));
+            AssertPooledState(expandedSpawn, true, false);
             Assert.AreEqual(1, expandedHandler.DespawnCount);
+            Assert.IsTrue(Toolbox.Pooler.TryDespawn(firstSpawn));
             Object.DestroyImmediate(prefab);
         }
 
@@ -683,6 +1470,13 @@ namespace VolumeBox.Toolbox.Tests
             Assert.AreEqual("instantiated", pooledObject.name);
             Assert.AreEqual(1, lifecycle.RiseCount);
             Assert.AreEqual(1, lifecycle.ReadyCount);
+
+            var spawnedObject = Toolbox.Pooler.Spawn(poolTag);
+
+            Assert.AreSame(pooledObject, spawnedObject);
+            AssertPooledState(spawnedObject, true, true);
+            Assert.IsTrue(Toolbox.Pooler.TryDespawn(spawnedObject));
+            AssertPooledState(spawnedObject, true, false);
             Object.DestroyImmediate(prefab);
         }
 
