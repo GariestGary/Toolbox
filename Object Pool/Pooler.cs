@@ -101,30 +101,39 @@ namespace VolumeBox.Toolbox
         }
         private void ClearPoolGarbage(Pool pool)
         {
-            var unusedObjects = pool.objects.Where(o => !o.Used).ToList();
+            var unusedCount = 0;
 
-            if(unusedObjects.Count <= 0)
+            for (int i = 0; i < pool.objects.Count; i++)
+            {
+                if (!pool.objects[i].Used)
+                {
+                    unusedCount++;
+                }
+            }
+
+            var objectsToRemove = unusedCount - pool.size;
+
+            if (objectsToRemove <= 0)
             {
                 return;
             }
 
-            var allObjectsCount = pool.objects.Count;
-            var excessObjectsCount = allObjectsCount - pool.size;
-            var canBeCleared = excessObjectsCount - (unusedObjects.Count - pool.size) >= 0;
-            var usedObjects = allObjectsCount - unusedObjects.Count;
-            excessObjectsCount -= usedObjects;
-
-            if (canBeCleared)
+            for (int i = 0; i < pool.objects.Count && objectsToRemove > 0;)
             {
-                for(int i = 0; i < excessObjectsCount; i++) 
+                var pooledObject = pool.objects[i];
+
+                if (pooledObject.Used)
                 {
-                    var unused = unusedObjects[i];
-                    pool.objects.Remove(unused);
-                    Destroy(unused.GameObject);
-                    _removeMessage.Obj = unused.GameObject;
-                    _removeMessage.RemoveType = GameObjectRemoveType.Destroyed;
-                    _Msg.Send(_removeMessage);
+                    i++;
+                    continue;
                 }
+
+                pool.objects.RemoveAt(i);
+                Destroy(pooledObject.GameObject);
+                _removeMessage.Obj = pooledObject.GameObject;
+                _removeMessage.RemoveType = GameObjectRemoveType.Destroyed;
+                _Msg.Send(_removeMessage);
+                objectsToRemove--;
             }
         }
 

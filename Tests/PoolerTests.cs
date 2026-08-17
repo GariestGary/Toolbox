@@ -18,6 +18,10 @@ namespace VolumeBox.Toolbox.Tests
             "_poolsWithNullTag",
             BindingFlags.Instance | BindingFlags.NonPublic);
 
+        private static readonly FieldInfo PoolsField = typeof(Pooler).GetField(
+            "pools",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
         private int spawnCount;
 
         [Test]
@@ -269,6 +273,11 @@ namespace VolumeBox.Toolbox.Tests
         private static List<Pool> GetPoolsWithNullTag(Pooler pooler)
         {
             return (List<Pool>)PoolsWithNullTagField.GetValue(pooler);
+        }
+
+        private static List<Pool> GetPools(Pooler pooler)
+        {
+            return (List<Pool>)PoolsField.GetValue(pooler);
         }
 
         [Test]
@@ -752,6 +761,160 @@ namespace VolumeBox.Toolbox.Tests
             yield return null;
         }
 
+        [Test]
+        public void GarbageCollectorKeepsUnusedObjectsWithinReserve()
+        {
+            var noUnusedPool = CreateGarbagePool(
+                "GC no unused",
+                3,
+                out var noUnusedObjects,
+                true,
+                true);
+            var belowReservePool = CreateGarbagePool(
+                "GC below reserve",
+                5,
+                out var belowReserveObjects,
+                false,
+                false,
+                false);
+            var equalReservePool = CreateGarbagePool(
+                "GC equal reserve",
+                3,
+                out var equalReserveObjects,
+                false,
+                false,
+                false);
+
+            try
+            {
+                Toolbox.Pooler.ForceGarbageCollector();
+
+                Assert.AreEqual(2, noUnusedPool.objects.Count);
+                Assert.AreEqual(3, belowReservePool.objects.Count);
+                Assert.AreEqual(3, equalReservePool.objects.Count);
+                CollectionAssert.AreEqual(noUnusedObjects, noUnusedPool.objects);
+                CollectionAssert.AreEqual(belowReserveObjects, belowReservePool.objects);
+                CollectionAssert.AreEqual(equalReserveObjects, equalReservePool.objects);
+            }
+            finally
+            {
+                DestroyGarbagePool(noUnusedPool, noUnusedObjects);
+                DestroyGarbagePool(belowReservePool, belowReserveObjects);
+                DestroyGarbagePool(equalReservePool, equalReserveObjects);
+            }
+        }
+
+        [Test]
+        public void GarbageCollectorRemovesFirstExcessUnusedObjectsAndSendsMessages()
+        {
+            var pool = CreateGarbagePool(
+                "GC mixed order",
+                3,
+                out var objects,
+                false,
+                true,
+                false,
+                true,
+                false,
+                true,
+                false,
+                true,
+                false);
+            var removedObjects = new List<GameObject>();
+            var removeTypes = new List<GameObjectRemoveType>();
+            var subscriber = Toolbox.Messenger.Subscribe<GameObjectRemovedMessage>(message =>
+            {
+                for (int i = 0; i < objects.Length; i++)
+                {
+                    if (!ReferenceEquals(objects[i].GameObject, message.Obj))
+                    {
+                        continue;
+                    }
+
+                    removedObjects.Add(message.Obj);
+                    removeTypes.Add(message.RemoveType);
+                    break;
+                }
+            });
+
+            try
+            {
+                Toolbox.Pooler.ForceGarbageCollector();
+
+                Assert.AreEqual(7, pool.objects.Count);
+                CollectionAssert.AreEqual(
+                    new[]
+                    {
+                        objects[1],
+                        objects[3],
+                        objects[4],
+                        objects[5],
+                        objects[6],
+                        objects[7],
+                        objects[8]
+                    },
+                    pool.objects);
+                Assert.IsTrue(pool.objects[0].Used);
+                Assert.IsTrue(pool.objects[1].Used);
+                Assert.IsFalse(pool.objects[2].Used);
+                Assert.IsTrue(pool.objects[3].Used);
+                Assert.IsFalse(pool.objects[4].Used);
+                Assert.IsTrue(pool.objects[5].Used);
+                Assert.IsFalse(pool.objects[6].Used);
+                CollectionAssert.AreEqual(
+                    new[] { objects[0].GameObject, objects[2].GameObject },
+                    removedObjects);
+                CollectionAssert.AreEqual(
+                    new[] { GameObjectRemoveType.Destroyed, GameObjectRemoveType.Destroyed },
+                    removeTypes);
+
+                Toolbox.Pooler.ForceGarbageCollector();
+
+                Assert.AreEqual(7, pool.objects.Count);
+                Assert.AreEqual(2, removedObjects.Count);
+            }
+            finally
+            {
+                Toolbox.Messenger.RemoveSubscriber(subscriber);
+                DestroyGarbagePool(pool, objects);
+            }
+        }
+
+        [Test]
+        public void ForceGarbageCollectorProcessesPoolsIndependently()
+        {
+            var firstPool = CreateGarbagePool(
+                "GC independent first",
+                1,
+                out var firstObjects,
+                false,
+                false,
+                false);
+            var secondPool = CreateGarbagePool(
+                "GC independent second",
+                2,
+                out var secondObjects,
+                true,
+                false,
+                false,
+                false);
+
+            try
+            {
+                Toolbox.Pooler.ForceGarbageCollector();
+
+                CollectionAssert.AreEqual(new[] { firstObjects[2] }, firstPool.objects);
+                CollectionAssert.AreEqual(
+                    new[] { secondObjects[0], secondObjects[2], secondObjects[3] },
+                    secondPool.objects);
+            }
+            finally
+            {
+                DestroyGarbagePool(firstPool, firstObjects);
+                DestroyGarbagePool(secondPool, secondObjects);
+            }
+        }
+
         [UnityTest, PrebuildSetup(typeof(TestPrebuild))]
         public IEnumerator PoolerGCTest()
         {
@@ -779,6 +942,41 @@ namespace VolumeBox.Toolbox.Tests
             Assert.AreEqual(5, Toolbox.Pooler.GetPoolObjectsCount("Test pool GC"));
 
             yield return null;
+        }
+
+        private static Pool CreateGarbagePool(
+            string tag,
+            int reserveSize,
+            out PooledGameObject[] objects,
+            params bool[] usedStates)
+        {
+            objects = new PooledGameObject[usedStates.Length];
+
+            for (int i = 0; i < usedStates.Length; i++)
+            {
+                objects[i] = new PooledGameObject
+                {
+                    GameObject = new GameObject($"{tag} {i}"),
+                    Used = usedStates[i]
+                };
+            }
+
+            var pool = new Pool(tag, null, reserveSize, new List<PooledGameObject>(objects));
+            GetPools(Toolbox.Pooler).Add(pool);
+            return pool;
+        }
+
+        private static void DestroyGarbagePool(Pool pool, PooledGameObject[] objects)
+        {
+            GetPools(Toolbox.Pooler).Remove(pool);
+
+            for (int i = 0; i < objects.Length; i++)
+            {
+                if (objects[i].GameObject != null)
+                {
+                    Object.DestroyImmediate(objects[i].GameObject);
+                }
+            }
         }
     }
 }
