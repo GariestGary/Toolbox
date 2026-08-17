@@ -83,15 +83,16 @@ namespace VolumeBox.Toolbox
         /// <param name="objs">Array of GameObjects</param>
         public void InitializeObjects(GameObject[] objs)
         {
-            MonoCached[] monos = new MonoCached[0];
-
-            for (int i = 0; i < objs.Length; i++)
+            if (objs == null || objs.Length == 0)
             {
-                var components = objs[i].GetComponentsInChildren<MonoCached>(true);
-                monos = monos.Concat(components).ToArray();
+                return;
             }
 
-            for (int i = 0; i < monos.Length; i++)
+            var monos = new List<MonoCached>(objs.Length);
+            var scratch = new List<MonoCached>();
+            CollectMonos(objs, monos, scratch);
+
+            for (int i = 0; i < monos.Count; i++)
             {
                 var mono = monos[i];
                 
@@ -103,7 +104,7 @@ namespace VolumeBox.Toolbox
                 InvokeRise(mono);
             }
 
-            for (int i = 0; i < monos.Length; i++)
+            for (int i = 0; i < monos.Count; i++)
             {
                 var mono = monos[i];
                 
@@ -115,7 +116,7 @@ namespace VolumeBox.Toolbox
                 InvokeReady(mono);
             }
 
-            for (int i = 0; i < monos.Length; i++)
+            for (int i = 0; i < monos.Count; i++)
             {
                 var mono = monos[i];
                 
@@ -134,17 +135,37 @@ namespace VolumeBox.Toolbox
         /// <param name="objs">Array of GameObjects</param>
         public void RemoveObjectsFromUpdate(GameObject[] objs)
         {
-            MonoCached[] monos = new MonoCached[0];
-
-            for (int i = 0; i < objs.Length; i++)
+            if (objs == null || objs.Length == 0)
             {
-                var components = objs[i].GetComponentsInChildren<MonoCached>(true);
-                monos = monos.Concat(components).ToArray();
+                return;
             }
 
-            for (int i = 0; i < monos.Length; i++)
+            var monos = new List<MonoCached>(objs.Length);
+            var scratch = new List<MonoCached>();
+            CollectMonos(objs, monos, scratch);
+
+            for (int i = 0; i < monos.Count; i++)
             {
                 RemoveMonoFromUpdate(monos[i]);
+            }
+        }
+
+        private static void CollectMonos(
+            GameObject[] objects,
+            List<MonoCached> destination,
+            List<MonoCached> scratch)
+        {
+            for (int i = 0; i < objects.Length; i++)
+            {
+                var obj = objects[i];
+                if (obj == null)
+                {
+                    continue;
+                }
+
+                scratch.Clear();
+                obj.GetComponentsInChildren(true, scratch);
+                destination.AddRange(scratch);
             }
         }
 

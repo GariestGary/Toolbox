@@ -1,204 +1,369 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 
 namespace VolumeBox.Toolbox
 {
-    public class Messenger: MonoBehaviour, IClear
-	{
-		private List<Subscriber> subscribers = new();
-		private Dictionary<Type, Message> _MessagesCache = new();
-		private Pooler _Pool;
-		
+    public class Messenger : MonoBehaviour, IClear
+    {
+        private readonly Dictionary<Type, List<Subscriber>> _subscribersByType = new();
+        private readonly List<Subscriber> _pendingAdditions = new();
+        private readonly List<Subscriber> _pendingRemovals = new();
+        private readonly Dictionary<Type, Message> _MessagesCache = new();
+        private Pooler _Pool;
+        private int _dispatchDepth;
+
 #if TOOLBOX_DEBUG
 
-		public Dictionary<Type, Message> MessagesCache => _MessagesCache;		
+        public Dictionary<Type, Message> MessagesCache => _MessagesCache;
 
 #endif
 
-		public void Initialize(Pooler pool)
-		{
-			_Pool = pool;
-            Subscribe<SceneUnloadedMessage>(m => CheckSceneSubscribers(m.SceneName), null, true);
-			Subscribe<GameObjectRemovedMessage>(m => CheckRemovedObject(m), null, true);
+        public void Initialize(Pooler pool)
+        {
+            _Pool = pool;
+            Subscribe<SceneUnloadedMessage>(message => CheckSceneSubscribers(message.SceneName), null, true);
+            Subscribe<GameObjectRemovedMessage>(CheckRemovedObject, null, true);
         }
 
-		private void CheckSceneSubscribers(string scene)
-		{
-			subscribers.RemoveAll(x => x.HasBind && x.BindedObject == null);
+        private void CheckSceneSubscribers(string scene)
+        {
+            foreach (var pair in _subscribersByType)
+            {
+                var subscribers = pair.Value;
 
-			var sceneSubs = subscribers.Where(x => x.BindedObject != null && x.BindedObject.scene.name == scene).ToList();
+                for (var i = 0; i < subscribers.Count; i++)
+                {
+                    var subscriber = subscribers[i];
 
-			foreach (var sub in sceneSubs)
-			{
-				RemoveSubscriber(sub);
-			}
-		}
+                    if (!subscriber.HasBind)
+                    {
+                        continue;
+                    }
 
-		private void CheckRemovedObject(GameObjectRemovedMessage msg)
-		{
-			if(msg.RemoveType != GameObjectRemoveType.Destroyed)
-			{
-				return;
-			}
+                    var bindedObject = subscriber.BindedObject;
 
-			var bindedSub = subscribers.FirstOrDefault(x => x.HasBind && x.BindedObject == msg.Obj);
+                    if (bindedObject == null || bindedObject.scene.name == scene)
+                    {
+                        RemoveSubscriber(subscriber);
+                    }
+                }
+            }
+        }
 
-			if(bindedSub is not null)
-			{
-				RemoveSubscriber(bindedSub);
-			}
-		}
+        private void CheckRemovedObject(GameObjectRemovedMessage message)
+        {
+            if (message.RemoveType != GameObjectRemoveType.Destroyed)
+            {
+                return;
+            }
+
+            foreach (var pair in _subscribersByType)
+            {
+                var subscribers = pair.Value;
+
+                for (var i = 0; i < subscribers.Count; i++)
+                {
+                    var subscriber = subscribers[i];
+
+                    if (subscriber.HasBind && subscriber.BindedObject == message.Obj)
+                    {
+                        RemoveSubscriber(subscriber);
+                        return;
+                    }
+                }
+            }
+        }
 
         public void ClearSubscribers()
         {
-			subscribers.RemoveAll(s => !s.Keep);
+            foreach (var pair in _subscribersByType)
+            {
+                var subscribers = pair.Value;
+
+                for (var i = 0; i < subscribers.Count; i++)
+                {
+                    var subscriber = subscribers[i];
+
+                    if (!subscriber.Keep && !_pendingRemovals.Contains(subscriber))
+                    {
+                        _pendingRemovals.Add(subscriber);
+                    }
+                }
+            }
+
+            for (var i = _pendingAdditions.Count - 1; i >= 0; i--)
+            {
+                if (!_pendingAdditions[i].Keep)
+                {
+                    _pendingAdditions.RemoveAt(i);
+                }
+            }
+
+            ApplyPendingMutationsIfPossible();
         }
 
         public void RemoveSubscriber(Subscriber subscriber)
         {
-	        if(subscriber == null) return;
+            if (subscriber == null || subscriber.Type == null)
+            {
+                return;
+            }
 
-	        if (subscribers == null || subscribers.Count <= 0)
-	        {
-		        return;
-	        }
+            if (_dispatchDepth == 0)
+            {
+                RemoveSubscriberImmediate(subscriber);
+                return;
+            }
 
-	        if(subscribers.Contains(subscriber))
-			{
-				subscribers.Remove(subscriber);
-			}
+            var pendingAdditionIndex = _pendingAdditions.IndexOf(subscriber);
+
+            if (pendingAdditionIndex >= 0)
+            {
+                _pendingAdditions.RemoveAt(pendingAdditionIndex);
+                return;
+            }
+
+            if (!_subscribersByType.TryGetValue(subscriber.Type, out var subscribers) ||
+                !subscribers.Contains(subscriber) ||
+                _pendingRemovals.Contains(subscriber))
+            {
+                return;
+            }
+
+            _pendingRemovals.Add(subscriber);
         }
 
         public void RemoveSubscribers(IEnumerable<Subscriber> subscribers)
         {
-	        foreach (var subscriber in subscribers)
-	        {
-		        RemoveSubscriber(subscriber);
-	        }
+            foreach (var subscriber in subscribers)
+            {
+                RemoveSubscriber(subscriber);
+            }
         }
 
-		public Subscriber Subscribe<T>(Action<T> next, GameObject bind = null, bool keep = false) where T: Message
-		{
-			var sub = new Subscriber(typeof(T), Callback, bind, keep);
-            subscribers.Add(sub);
-            return sub;
+        public Subscriber Subscribe<T>(Action<T> next, GameObject bind = null, bool keep = false) where T : Message
+        {
+            var subscriber = new Subscriber(typeof(T), Callback, bind, keep);
+            AddSubscriber(subscriber);
+            return subscriber;
+
             void Callback(object args) => next((T)args);
-		}
-
-		public Subscriber Subscribe<T>(Action next, GameObject bind = null, bool keep = false) where T : Message
-		{
-			var sub = new Subscriber(typeof(T), Callback, bind, keep);
-			subscribers.Add(sub);
-			return sub;
-			void Callback(object args) => next();
-		}
-
-		public Subscriber Subscribe(Type messageType, Action<Message> next, GameObject bind = null, bool keep = false)
-		{
-			var sub = new Subscriber(messageType, Callback, bind, keep);
-			subscribers.Add(sub);
-			return sub;
-			void Callback(Message args) => next(args);
-		}
-		
-		public Subscriber Subscribe(Type messageType, Action next, GameObject bind = null, bool keep = false)
-		{
-			var sub = new Subscriber(messageType, Callback, bind, keep);
-			subscribers.Add(sub);
-			return sub;
-			void Callback(Message args) => next();
-		}
-
-#if TOOLBOX_DEBUG
-		public bool Send<T>() where T : Message
-#else
-		public void Send<T>() where T: Message
-#endif
-		{
-			T msg = null;
-
-#if TOOLBOX_DEBUG
-			var usedCache = false;
-#endif
-
-			if(StaticData.Settings.UseMessageCaching && _MessagesCache.TryGetValue(typeof(T), out var cachedMessage))
-			{
-				msg = cachedMessage as T;
-#if TOOLBOX_DEBUG
-				usedCache = true;
-#endif
-			}
-			else
-			{
-				var message = (T)Activator.CreateInstance(typeof(T));
-
-				if(StaticData.Settings.UseMessageCaching)
-				{
-					_MessagesCache.Add(typeof(T), message);
-				}
-			}
-
-			Send(msg);
-
-#if TOOLBOX_DEBUG
-			return usedCache;
-#endif
-		}
-
-		public void Send<T>(T message) where T: Message
-		{
-			message ??= (T)Activator.CreateInstance(typeof(T));
-
-			var receivers = subscribers.Where(x => x.Type == message.GetType()).ToList();
-
-			for (int i = 0; i < receivers.Count(); i++)
-			{
-				var receiver = receivers[i];
-				
-				try
-				{
-					if(receiver.HasBind && (receiver.BindedObject == null))
-					{
-						RemoveSubscriber(receiver);
-						continue;
-					}
-				}
-				catch
-				{
-					RemoveSubscriber(receiver);
-					continue;
-
-				}
-
-				if(receiver.HasBind)
-				{
-					var receiverState = _Pool.IsObjectPooledAndUsed(receiver.BindedObject);
-					
-					if(!receiverState.IsPooled || (receiverState.IsPooled && receiverState.IsUsed))
-					{
-						receiver.Callback.Invoke(message);
-					}
-				}
-				else
-				{
-					receiver.Callback.Invoke(message);
-				}
-			}
         }
 
-		public int ClearMessageCache()
-		{
-			var clearedCount = _MessagesCache.Count;
-			_MessagesCache.Clear();
-			return clearedCount;
-		}
+        public Subscriber Subscribe<T>(Action next, GameObject bind = null, bool keep = false) where T : Message
+        {
+            var subscriber = new Subscriber(typeof(T), Callback, bind, keep);
+            AddSubscriber(subscriber);
+            return subscriber;
 
-		public void Clear()
-		{
-			subscribers.Clear();
-			_MessagesCache.Clear();
-		}
-	}
+            void Callback(object args) => next();
+        }
+
+        public Subscriber Subscribe(Type messageType, Action<Message> next, GameObject bind = null, bool keep = false)
+        {
+            var subscriber = new Subscriber(messageType, Callback, bind, keep);
+            AddSubscriber(subscriber);
+            return subscriber;
+
+            void Callback(Message args) => next(args);
+        }
+
+        public Subscriber Subscribe(Type messageType, Action next, GameObject bind = null, bool keep = false)
+        {
+            var subscriber = new Subscriber(messageType, Callback, bind, keep);
+            AddSubscriber(subscriber);
+            return subscriber;
+
+            void Callback(Message args) => next();
+        }
+
+#if TOOLBOX_DEBUG
+        public bool Send<T>() where T : Message
+#else
+        public void Send<T>() where T : Message
+#endif
+        {
+            T message;
+
+#if TOOLBOX_DEBUG
+            var usedCache = false;
+#endif
+
+            if (StaticData.Settings.UseMessageCaching &&
+                _MessagesCache.TryGetValue(typeof(T), out var cachedMessage))
+            {
+                message = cachedMessage as T;
+#if TOOLBOX_DEBUG
+                usedCache = true;
+#endif
+            }
+            else
+            {
+                message = (T)Activator.CreateInstance(typeof(T));
+
+                if (StaticData.Settings.UseMessageCaching)
+                {
+                    _MessagesCache.Add(typeof(T), message);
+                }
+            }
+
+            Send(message);
+
+#if TOOLBOX_DEBUG
+            return usedCache;
+#endif
+        }
+
+        public void Send<T>(T message) where T : Message
+        {
+            message ??= (T)Activator.CreateInstance(typeof(T));
+
+            if (!_subscribersByType.TryGetValue(message.GetType(), out var receivers) || receivers.Count == 0)
+            {
+                return;
+            }
+
+            _dispatchDepth++;
+
+            try
+            {
+                var receiverCount = receivers.Count;
+
+                for (var i = 0; i < receiverCount; i++)
+                {
+                    var receiver = receivers[i];
+
+                    try
+                    {
+                        if (receiver.HasBind && receiver.BindedObject == null)
+                        {
+                            RemoveSubscriber(receiver);
+                            continue;
+                        }
+                    }
+                    catch
+                    {
+                        RemoveSubscriber(receiver);
+                        continue;
+                    }
+
+                    if (receiver.HasBind)
+                    {
+                        var receiverState = _Pool.IsObjectPooledAndUsed(receiver.BindedObject);
+
+                        if (!receiverState.IsPooled || receiverState.IsUsed)
+                        {
+                            receiver.Callback.Invoke(message);
+                        }
+                    }
+                    else
+                    {
+                        receiver.Callback.Invoke(message);
+                    }
+                }
+            }
+            finally
+            {
+                _dispatchDepth--;
+                ApplyPendingMutationsIfPossible();
+            }
+        }
+
+        public int ClearMessageCache()
+        {
+            var clearedCount = _MessagesCache.Count;
+            _MessagesCache.Clear();
+            return clearedCount;
+        }
+
+        public void Clear()
+        {
+            _MessagesCache.Clear();
+
+            if (_dispatchDepth == 0)
+            {
+                _subscribersByType.Clear();
+                _pendingAdditions.Clear();
+                _pendingRemovals.Clear();
+                return;
+            }
+
+            foreach (var pair in _subscribersByType)
+            {
+                var subscribers = pair.Value;
+
+                for (var i = 0; i < subscribers.Count; i++)
+                {
+                    var subscriber = subscribers[i];
+
+                    if (!_pendingRemovals.Contains(subscriber))
+                    {
+                        _pendingRemovals.Add(subscriber);
+                    }
+                }
+            }
+
+            _pendingAdditions.Clear();
+        }
+
+        private void AddSubscriber(Subscriber subscriber)
+        {
+            if (_dispatchDepth > 0)
+            {
+                _pendingAdditions.Add(subscriber);
+            }
+            else
+            {
+                AddSubscriberImmediate(subscriber);
+            }
+        }
+
+        private void AddSubscriberImmediate(Subscriber subscriber)
+        {
+            if (!_subscribersByType.TryGetValue(subscriber.Type, out var subscribers))
+            {
+                subscribers = new List<Subscriber>();
+                _subscribersByType.Add(subscriber.Type, subscribers);
+            }
+
+            subscribers.Add(subscriber);
+        }
+
+        private void RemoveSubscriberImmediate(Subscriber subscriber)
+        {
+            if (!_subscribersByType.TryGetValue(subscriber.Type, out var subscribers) ||
+                !subscribers.Remove(subscriber))
+            {
+                return;
+            }
+
+            if (subscribers.Count == 0)
+            {
+                _subscribersByType.Remove(subscriber.Type);
+            }
+        }
+
+        private void ApplyPendingMutationsIfPossible()
+        {
+            if (_dispatchDepth > 0)
+            {
+                return;
+            }
+
+            for (var i = 0; i < _pendingRemovals.Count; i++)
+            {
+                RemoveSubscriberImmediate(_pendingRemovals[i]);
+            }
+
+            _pendingRemovals.Clear();
+
+            for (var i = 0; i < _pendingAdditions.Count; i++)
+            {
+                AddSubscriberImmediate(_pendingAdditions[i]);
+            }
+
+            _pendingAdditions.Clear();
+        }
+    }
 }

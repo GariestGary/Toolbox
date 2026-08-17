@@ -15,6 +15,8 @@ namespace VolumeBox.Toolbox
         private PoolerDataHolder _Data;
         private Transform objectPoolParent;
         private List<Pool> pools = new List<Pool>();
+        private readonly Dictionary<string, List<Pool>> _poolsByTag = new(StringComparer.Ordinal);
+        private readonly List<Pool> _poolsWithNullTag = new();
         private GameObjectRemovedMessage _removeMessage;
         private CancellationTokenSource m_GCTokenSource = new CancellationTokenSource();
         private Messenger _Msg;
@@ -29,6 +31,8 @@ namespace VolumeBox.Toolbox
             SetCustomRoot(_PredefinedRoot);
 
             pools = new List<Pool>();
+            _poolsByTag.Clear();
+            _poolsWithNullTag.Clear();
 
             for (int i = 0; i < _Data.PoolsList.Count; i++)
             {
@@ -131,6 +135,8 @@ namespace VolumeBox.Toolbox
             objectPoolParent = null;
             pools?.Clear();
             pools = null;
+            _poolsByTag.Clear();
+            _poolsWithNullTag.Clear();
         }
 
         public bool TryRemovePool(Pool pool)
@@ -154,31 +160,19 @@ namespace VolumeBox.Toolbox
             }
 
             pools.Remove(pool);
+            UnregisterPool(pool);
             return true;
         }
 
         public bool TryRemovePool(string tag)
         {
-            Pool poolToRemove = null;
-
-            for (int i = 0; i < pools.Count; i++)
-            {
-                var pool = pools[i];
-
-                if (pool.tag == tag)
-                {
-                    poolToRemove = pool;
-                    break;
-                }
-            }
-
-            if (poolToRemove == null)
+            if (!TryGetPoolsByTag(tag, out var matchingPools) || matchingPools.Count == 0)
             {
                 Debug.LogWarning($"There is no pool named {tag}");
                 return false;
             }
 
-            return TryRemovePool(poolToRemove);
+            return TryRemovePool(matchingPools[0]);
         }
         
         public Pool TryAddPool(PoolData poolToAdd, Func<GameObject, Vector3, Quaternion, Transform, GameObject> instantiateFunc = null, Action<GameObject> spawnAction = null)
@@ -208,6 +202,7 @@ namespace VolumeBox.Toolbox
 
             var pool = new Pool(poolToAdd.tag, poolToAdd.pooledObject, poolToAdd.size, objectPoolList, instantiateFunc, spawnAction);
             pools.Add(pool);
+            RegisterPool(pool);
             return pool;
         }
 
@@ -216,18 +211,84 @@ namespace VolumeBox.Toolbox
             PoolData pool = new PoolData() { tag = tag, pooledObject = obj, size = size };
             return TryAddPool(pool, instantiateFunc, spawnAction);
         }
+
+        private bool TryGetPoolsByTag(string tag, out List<Pool> matchingPools)
+        {
+            if (tag == null)
+            {
+                matchingPools = _poolsWithNullTag;
+                return matchingPools.Count > 0;
+            }
+
+            return _poolsByTag.TryGetValue(tag, out matchingPools);
+        }
+
+        private void RegisterPool(Pool pool)
+        {
+            List<Pool> matchingPools;
+
+            if (pool.tag == null)
+            {
+                matchingPools = _poolsWithNullTag;
+            }
+            else if (!_poolsByTag.TryGetValue(pool.tag, out matchingPools))
+            {
+                matchingPools = new List<Pool>();
+                _poolsByTag.Add(pool.tag, matchingPools);
+            }
+
+            if (!matchingPools.Contains(pool))
+            {
+                matchingPools.Add(pool);
+            }
+        }
+
+        private void UnregisterPool(Pool pool)
+        {
+            if (_poolsWithNullTag.Remove(pool))
+            {
+                return;
+            }
+
+            string emptyTag = null;
+
+            foreach (var pair in _poolsByTag)
+            {
+                if (!pair.Value.Remove(pool))
+                {
+                    continue;
+                }
+
+                if (pair.Value.Count == 0)
+                {
+                    emptyTag = pair.Key;
+                }
+
+                break;
+            }
+
+            if (emptyTag != null)
+            {
+                _poolsByTag.Remove(emptyTag);
+            }
+        }
         
         public int GetPoolObjectsCount(string poolTag)
         {
-            var allPools = pools.Where(p => p.tag == poolTag);
-
-            if(allPools.Count() <= 0)
+            if (!TryGetPoolsByTag(poolTag, out var matchingPools) || matchingPools.Count == 0)
             {
                 Debug.LogWarning($"There is no pool named {poolTag}");
                 return -1;
             }
 
-            return allPools.Sum(p => p.CurrentObjectsCount);
+            var objectsCount = 0;
+
+            for (var i = 0; i < matchingPools.Count; i++)
+            {
+                objectsCount += matchingPools[i].CurrentObjectsCount;
+            }
+
+            return objectsCount;
         }
 
         #region Instantiating
@@ -245,16 +306,14 @@ namespace VolumeBox.Toolbox
         public GameObject Spawn(string poolTag, Vector3 position, Quaternion rotation, Transform parent = null, object data = null, bool traverseHierarchy = false)
         {
             //Returns null if object pool with specified tag doesn't exists
-            var poolsToUse = pools.Where(p => p.tag == poolTag).ToArray();
-
-            if(poolsToUse.Length <= 0)
+            if (!TryGetPoolsByTag(poolTag, out var poolsToUse) || poolsToUse.Count == 0)
             {
                 Debug.LogWarning($"Object pool with tag '{poolTag}' doesn't exists");
                 return null;
             }
 
             //get first unused obj
-            var poolToUse = poolsToUse[UnityEngine.Random.Range(0, poolsToUse.Length)];
+            var poolToUse = poolsToUse[UnityEngine.Random.Range(0, poolsToUse.Count)];
             var objToSpawn = poolToUse.objects.FirstOrDefault(o => !o.Used);
 
             //Create new object if last in list is active
@@ -286,11 +345,11 @@ namespace VolumeBox.Toolbox
             //Call all spawn methods in gameobject
             if (traverseHierarchy)
             {
-                CallSpawns(objToSpawn.GameObject, data);
+                CallSpawns(objToSpawn, data);
             }
             else
             {
-                CallSpawn(objToSpawn.GameObject, data);    
+                CallSpawn(objToSpawn, data);
             }
 
             objToSpawn.Used = true;
@@ -472,7 +531,7 @@ namespace VolumeBox.Toolbox
                 return true;
             }
 
-            CallDespawns(pgo.GameObject);
+            CallDespawns(pgo);
 
             pgo.Used = false;
             ReturnToPool(pgo.GameObject);
@@ -558,63 +617,32 @@ namespace VolumeBox.Toolbox
             return new ObjectPooledState(false, false);
         }
 
-        private void CallSpawn(GameObject obj, object data)
+        private void CallSpawn(PooledGameObject pooledObject, object data)
         {
-            MonoCached mono = obj.GetComponentsInChildren<MonoCached>(true).FirstOrDefault(o => o is IPooledBase);
-            CallPooledInterface(data, mono);
-        }
-        
-        private void CallSpawns(GameObject obj, object data) 
-        {
-            MonoCached[] pooledMono = obj.GetComponentsInChildren<MonoCached>(true).Where(o => o is IPooledBase).ToArray();
-
-            for (int i = 0; i < pooledMono.Length; i++)
-            {
-                var mono = pooledMono[i];
-                CallPooledInterface(data, mono);
-            }
-        }
-
-        private void CallPooledInterface(object data, MonoCached mono)
-        {
-            if (mono == null)
+            if (pooledObject.SpawnHandlers.Length == 0)
             {
                 return;
             }
 
-            var type = mono.GetType();
-            var interfaces = type.GetInterfaces();
+            pooledObject.SpawnHandlers[0].Invoke(data);
+        }
 
-            for (int j = 0; j < interfaces.Length; j++)
+        private void CallSpawns(PooledGameObject pooledObject, object data)
+        {
+            for (int i = 0; i < pooledObject.SpawnHandlers.Length; i++)
             {
-                var inter = interfaces[j];
-
-                if (inter.GetInterface(nameof(IPooledBase)) != null)
-                {
-                    var generics = inter.GetGenericArguments();
-                    var onSpawnMethod = inter.GetMethod("OnSpawn");
-
-                    if (generics.Length > 0)
-                    {
-                        onSpawnMethod?.Invoke(mono, new[] { data });
-                    }
-                    else
-                    {
-                        onSpawnMethod?.Invoke(mono, new object[]{});
-                    }
-                }
+                pooledObject.SpawnHandlers[i].Invoke(data);
             }
         }
 
-        private void CallDespawns(GameObject obj)
+        private void CallDespawns(PooledGameObject pooledObject)
         {
-            IDespawn[] despawns = obj.GetComponentsInChildren<IDespawn>(true);
-
-            for(int i = 0; i < despawns.Length; i++)
+            for (var i = 0; i < pooledObject.DespawnHandlers.Length; i++)
             {
-                var despawnable = despawns[i];
+                var despawnable = pooledObject.DespawnHandlers[i];
+                var unityObject = despawnable as UnityEngine.Object;
 
-                if(despawnable != null)
+                if (unityObject != null)
                 {
                     despawnable.OnDespawn();
                 }
@@ -632,19 +660,96 @@ namespace VolumeBox.Toolbox
 
             GameObject poolObj = Create(obj, poolParent, instantiateFunc);
 
-            _Upd.InitializeObject(poolObj);
-
             poolObj.Disable();
 
             PooledGameObject pgo = new PooledGameObject()
             {
                 GameObject = poolObj,
-                Used = false
+                Used = false,
+                SpawnHandlers = FindSpawnHandlers(poolObj),
+                DespawnHandlers = poolObj.GetComponentsInChildren<IDespawn>(true)
             };
             
             poolQueue.Add(pgo);
 
             return poolObj;
+        }
+
+        private PooledSpawnHandler[] FindSpawnHandlers(GameObject poolObject)
+        {
+            var components = poolObject.GetComponentsInChildren<MonoCached>(true);
+            var handlerCount = 0;
+
+            for (var i = 0; i < components.Length; i++)
+            {
+                if (components[i] is IPooledBase)
+                {
+                    handlerCount++;
+                }
+            }
+
+            if (handlerCount == 0)
+            {
+                return Array.Empty<PooledSpawnHandler>();
+            }
+
+            var handlers = new PooledSpawnHandler[handlerCount];
+            var handlerIndex = 0;
+
+            for (var i = 0; i < components.Length; i++)
+            {
+                var component = components[i];
+
+                if (component is not IPooledBase)
+                {
+                    continue;
+                }
+
+                handlers[handlerIndex] = CreateSpawnHandler(component);
+                handlerIndex++;
+            }
+
+            return handlers;
+        }
+
+        private PooledSpawnHandler CreateSpawnHandler(MonoCached component)
+        {
+            var interfaces = component.GetType().GetInterfaces();
+            var invokerCount = 0;
+
+            for (var i = 0; i < interfaces.Length; i++)
+            {
+                if (interfaces[i].GetMethod(
+                        "InvokePooledSpawn",
+                        System.Reflection.BindingFlags.Instance |
+                        System.Reflection.BindingFlags.NonPublic) != null)
+                {
+                    invokerCount++;
+                }
+            }
+
+            var invokers = new Action<object>[invokerCount];
+            var invokerIndex = 0;
+
+            for (var i = 0; i < interfaces.Length; i++)
+            {
+                var invokeMethod = interfaces[i].GetMethod(
+                    "InvokePooledSpawn",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic);
+
+                if (invokeMethod == null)
+                {
+                    continue;
+                }
+
+                invokers[invokerIndex] = (Action<object>)invokeMethod.CreateDelegate(
+                    typeof(Action<object>),
+                    component);
+                invokerIndex++;
+            }
+
+            return new PooledSpawnHandler(invokers);
         }
     }
     
@@ -689,6 +794,27 @@ namespace VolumeBox.Toolbox
     {
         public GameObject GameObject;
         public bool Used;
+        // Lifecycle metadata captures creation-time hierarchy order; runtime changes are intentionally not rescanned.
+        internal PooledSpawnHandler[] SpawnHandlers = Array.Empty<PooledSpawnHandler>();
+        internal IDespawn[] DespawnHandlers = Array.Empty<IDespawn>();
+    }
+
+    internal sealed class PooledSpawnHandler
+    {
+        private readonly Action<object>[] _invokers;
+
+        public PooledSpawnHandler(Action<object>[] invokers)
+        {
+            _invokers = invokers;
+        }
+
+        public void Invoke(object data)
+        {
+            for (var i = 0; i < _invokers.Length; i++)
+            {
+                _invokers[i].Invoke(data);
+            }
+        }
     }
     
     public class GameObjectRemovedMessage: Message

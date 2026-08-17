@@ -17,15 +17,19 @@ namespace VolumeBox.Toolbox
         protected float delta;
         protected float fixedDelta;
         protected float interval;
+        private float _fixedInterval;
         private RectTransform rect;
         private bool pausedByActiveState = false;
         private bool pausedManual = false;
         private bool raised;
         private bool ready;
 
-        [HideInInspector] private float IntervalTimer;
-        [HideInInspector] private float TimeStack;
-        [HideInInspector] private float FixedTimeStack;
+        [HideInInspector] private float _renderIntervalTimer;
+        [HideInInspector] private float _renderTimeStack;
+        [HideInInspector] private float _renderIntervalAtTick;
+        [HideInInspector] private bool _renderTickPendingLateTick;
+        [HideInInspector] private float _fixedIntervalTimer;
+        [HideInInspector] private float _fixedTimeStack;
 
         #region Properties
         public bool Paused => pausedByActiveState || pausedManual;
@@ -63,6 +67,22 @@ namespace VolumeBox.Toolbox
                 else
                 {
                     interval = value;
+                }
+            }
+        }
+
+        public float FixedInterval
+        {
+            get => _fixedInterval;
+            set
+            {
+                if (value < 0)
+                {
+                    _fixedInterval = 0;
+                }
+                else
+                {
+                    _fixedInterval = value;
                 }
             }
         }
@@ -107,52 +127,85 @@ namespace VolumeBox.Toolbox
         {
             if (Interval > 0)
             {
-                if (IntervalTimer >= Interval)
+                _renderIntervalTimer += extDelta;
+                _renderTimeStack += extDelta;
+
+                if (!_renderTickPendingLateTick && _renderIntervalTimer >= Interval)
                 {
-                    Process(TimeStack);
-                    TimeStack = 0;
-                    IntervalTimer -= Interval;
+                    var dueInterval = Interval;
+
+                    if (Process(_renderTimeStack))
+                    {
+                        _renderIntervalAtTick = dueInterval;
+                        _renderTickPendingLateTick = true;
+                    }
+                    else
+                    {
+                        CompleteRenderInterval(dueInterval);
+                    }
                 }
-                IntervalTimer += extDelta;
-                TimeStack += extDelta;
             }
             else
             {
-               Process(extDelta);
+                if (!_renderTickPendingLateTick)
+                {
+                    _renderIntervalTimer = 0;
+                    _renderTimeStack = 0;
+                }
+
+                Process(extDelta);
             }
         }
 
         internal void FixedProcessControl(float extFixedDelta)
         {
-            if (Interval > 0)
+            if (FixedInterval > 0)
             {
-                if (IntervalTimer >= Interval)
+                _fixedIntervalTimer += extFixedDelta;
+                _fixedTimeStack += extFixedDelta;
+
+                if (_fixedIntervalTimer >= FixedInterval)
                 {
-                    FixedProcess(FixedTimeStack);
-                    FixedTimeStack = 0;
+                    var dueInterval = FixedInterval;
+                    FixedProcess(_fixedTimeStack);
+                    _fixedTimeStack = 0;
+                    _fixedIntervalTimer %= dueInterval;
                 }
-                FixedTimeStack += extFixedDelta;
             }
             else
             {
+                _fixedIntervalTimer = 0;
+                _fixedTimeStack = 0;
                 FixedProcess(extFixedDelta);
             }
         }
 
         internal void LateProcessControl(float extDelta)
         {
-            if (Interval > 0)
+            if (_renderTickPendingLateTick)
             {
-                if (IntervalTimer >= Interval)
+                try
                 {
-                    //Time stack counting in Process method
-                    LateProcess(TimeStack);
+                    LateProcess(_renderTimeStack);
+                }
+                finally
+                {
+                    CompleteRenderInterval(_renderIntervalAtTick);
                 }
             }
-            else
+            else if (Interval <= 0)
             {
                 LateProcess(delta);
             }
+        }
+
+        private void CompleteRenderInterval(float completedInterval)
+        {
+            _renderIntervalTimer %= completedInterval;
+
+            _renderTimeStack = 0;
+            _renderIntervalAtTick = 0;
+            _renderTickPendingLateTick = false;
         }
 
         #region Virtual Process Methods
@@ -200,13 +253,14 @@ namespace VolumeBox.Toolbox
         #endregion
 
         #region Process Methods
-        private void Process(float delta)
+        private bool Process(float delta)
         {
             this.delta = delta;
 
-            if(Paused) return;
+            if(Paused) return false;
 
             Tick();
+            return true;
         }
 
         private void FixedProcess(float fixedDelta)

@@ -12,6 +12,9 @@
     "name": "GariestGary",
     "url": "https://github.com/GariestGary"
   },
+  "dependencies": {
+    "com.cysharp.unitask": "2.5.11"
+  },
   "type": "tool",
   "publishConfig": {
     "registry": "https://package.openupm.com"
