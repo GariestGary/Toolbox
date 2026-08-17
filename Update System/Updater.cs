@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 
 namespace VolumeBox.Toolbox
@@ -35,7 +34,8 @@ namespace VolumeBox.Toolbox
         }
         public float Delta => _InternalDelta;
 
-        private List<MonoCached> _RunningMonos = new List<MonoCached>();
+        private readonly List<MonoCached> _RunningMonos = new List<MonoCached>();
+        private readonly HashSet<MonoCached> _RunningMonosSet = new HashSet<MonoCached>();
         private List<Action<float>> _CustomTicks = new List<Action<float>>();
         private List<Action<float>> _CustomFixedTicks = new List<Action<float>>();
         private List<Action<float>> _CustomLateTicks = new List<Action<float>>();
@@ -91,42 +91,7 @@ namespace VolumeBox.Toolbox
             var monos = new List<MonoCached>(objs.Length);
             var scratch = new List<MonoCached>();
             CollectMonos(objs, monos, scratch);
-
-            for (int i = 0; i < monos.Count; i++)
-            {
-                var mono = monos[i];
-                
-                if (mono == null || _RunningMonos.Contains(mono))
-                {
-                    continue;
-                }
-
-                InvokeRise(mono);
-            }
-
-            for (int i = 0; i < monos.Count; i++)
-            {
-                var mono = monos[i];
-                
-                if (mono == null || _RunningMonos.Contains(mono))
-                {
-                    continue;
-                }
-
-                InvokeReady(mono);
-            }
-
-            for (int i = 0; i < monos.Count; i++)
-            {
-                var mono = monos[i];
-                
-                if (mono == null || _RunningMonos.Contains(mono))
-                {
-                    continue;
-                }
-
-                _RunningMonos.Add(mono);
-            }
+            InitializeMonos(monos);
         }
 
         /// <summary>
@@ -178,36 +143,7 @@ namespace VolumeBox.Toolbox
             if (obj == null) return;
 
             var objMonos = obj.GetComponentsInChildren<MonoCached>(true);
-
-            foreach (var mono in objMonos)
-            {
-                if (_RunningMonos.Contains(mono))
-                {
-                    continue;
-                }
-
-                InvokeRise(mono);
-            }
-
-            foreach (var mono in objMonos)
-            {
-                if (_RunningMonos.Contains(mono))
-                {
-                    continue;
-                }
-
-                InvokeReady(mono);
-            }
-            
-            foreach (var mono in objMonos)
-            {
-                if (_RunningMonos.Contains(mono))
-                {
-                    continue;
-                }
-
-                _RunningMonos.Add(mono);
-            }
+            InitializeMonos(objMonos);
         }
 
         public void InitializeMonos(IEnumerable<MonoCached> monos)
@@ -216,31 +152,43 @@ namespace VolumeBox.Toolbox
             {
                 return;
             }
-    
-            // Если _RunningMonos - List, преобразуем в HashSet для O(1) проверок
-            var runningSet = _RunningMonos.ToHashSet();
-    
-            var monosToAdd = monos.Where(mono => mono != null && runningSet.Add(mono)).ToList();
-    
-            // Один проход для фильтрации
+
+            var monosToAdd = new List<MonoCached>();
+            var batchSet = new HashSet<MonoCached>();
+
+            foreach (var mono in monos)
+            {
+                if (mono == null || _RunningMonosSet.Contains(mono) || !batchSet.Add(mono))
+                {
+                    continue;
+                }
+
+                monosToAdd.Add(mono);
+            }
 
             if (monosToAdd.Count == 0)
             {
                 return;
             }
-    
-            // Выполняем операции
-            foreach (var mono in monosToAdd)
+
+            for (int i = 0; i < monosToAdd.Count; i++)
             {
-                InvokeRise(mono);
+                InvokeRise(monosToAdd[i]);
             }
-            
-            foreach (var mono in monosToAdd)
+
+            for (int i = 0; i < monosToAdd.Count; i++)
             {
-                InvokeReady(mono);
+                InvokeReady(monosToAdd[i]);
             }
-    
-            _RunningMonos.AddRange(monosToAdd);
+
+            for (int i = 0; i < monosToAdd.Count; i++)
+            {
+                var mono = monosToAdd[i];
+                if (_RunningMonosSet.Add(mono))
+                {
+                    _RunningMonos.Add(mono);
+                }
+            }
         }
 
         /// <summary>
@@ -248,11 +196,16 @@ namespace VolumeBox.Toolbox
         /// </summary>
         public void InitializeMono(MonoCached mono)
         {
-            if (mono == null || _RunningMonos.Contains(mono)) return;
+            if (mono == null || _RunningMonosSet.Contains(mono)) return;
 
             InvokeRise(mono);
             InvokeReady(mono);
-            _RunningMonos.Add(mono);
+
+            if (_RunningMonosSet.Add(mono))
+            {
+                _RunningMonos.Add(mono);
+            }
+
             mono.Resume();
         }
 
@@ -264,7 +217,11 @@ namespace VolumeBox.Toolbox
             if (mono == null) return;
 
             mono.Pause();
-            _RunningMonos.Remove(mono);
+            var removedFromSet = _RunningMonosSet.Remove(mono);
+            var removedFromList = _RunningMonos.Remove(mono);
+            Debug.Assert(
+                removedFromSet == removedFromList,
+                "Updater running MonoCached collections are out of sync");
         }
         
         private void InvokeRise(MonoCached mono)

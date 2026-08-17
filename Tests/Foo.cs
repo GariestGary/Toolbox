@@ -13,12 +13,14 @@ namespace VolumeBox.Toolbox.Tests
         public int ReadyCount { get; private set; }
         public string LifecycleId { get; set; }
         public List<string> LifecycleEvents { get; set; }
+        public System.Action RiseAction { get; set; }
         public float counter = 0;
 
         protected override void Rise()
         {
             RiseCount++;
             LifecycleEvents?.Add($"{LifecycleId}.Rise");
+            RiseAction?.Invoke();
         }
 
         protected override void Ready()

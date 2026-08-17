@@ -156,6 +156,140 @@ namespace VolumeBox.Toolbox.Tests
             UnityEngine.Object.DestroyImmediate(root);
         }
 
+        [Test]
+        public void InitializeMonosFiltersBatchAndPreservesGlobalLifecycleStaging()
+        {
+            var lifecycleEvents = new System.Collections.Generic.List<string>();
+            var firstRoot = new GameObject("Updater batch first");
+            var secondRoot = new GameObject("Updater batch second");
+            var thirdRoot = new GameObject("Updater batch third");
+            var first = AddLifecycleFoo(firstRoot, "First", lifecycleEvents);
+            var second = AddLifecycleFoo(secondRoot, "Second", lifecycleEvents);
+            var third = AddLifecycleFoo(thirdRoot, "Third", lifecycleEvents);
+
+            Toolbox.Updater.InitializeMonos(new MonoCached[] { first, null, second, first, third });
+
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    "First.Rise",
+                    "Second.Rise",
+                    "Third.Rise",
+                    "First.Ready",
+                    "Second.Ready",
+                    "Third.Ready"
+                },
+                lifecycleEvents);
+            AssertLifecycleInvokedOnce(first, second, third);
+            AssertRunningMembership(first, true);
+            AssertRunningMembership(second, true);
+            AssertRunningMembership(third, true);
+
+            UnityEngine.Object.DestroyImmediate(firstRoot);
+            UnityEngine.Object.DestroyImmediate(secondRoot);
+            UnityEngine.Object.DestroyImmediate(thirdRoot);
+        }
+
+        [Test]
+        public void InitializationEntryPointsKeepRunningMembershipSynchronized()
+        {
+            var lifecycleEvents = new System.Collections.Generic.List<string>();
+            var monoRoot = new GameObject("Updater mono entry point");
+            var objectRoot = new GameObject("Updater object entry point");
+            var objectsRoot = new GameObject("Updater objects entry point");
+            var newRoot = new GameObject("Updater new batch entry");
+            var monoFoo = AddLifecycleFoo(monoRoot, "Mono", lifecycleEvents);
+            var objectFoo = AddLifecycleFoo(objectRoot, "Object", lifecycleEvents);
+            var objectsFoo = AddLifecycleFoo(objectsRoot, "Objects", lifecycleEvents);
+            var newFoo = AddLifecycleFoo(newRoot, "New", lifecycleEvents);
+
+            Toolbox.Updater.InitializeMono(monoFoo);
+            Toolbox.Updater.InitializeObject(objectRoot);
+            Toolbox.Updater.InitializeObjects(new[] { objectsRoot });
+            lifecycleEvents.Clear();
+
+            Toolbox.Updater.InitializeMonos(
+                new MonoCached[] { monoFoo, objectFoo, objectsFoo, newFoo, newFoo, null });
+
+            CollectionAssert.AreEqual(new[] { "New.Rise", "New.Ready" }, lifecycleEvents);
+            AssertLifecycleInvokedOnce(monoFoo, objectFoo, objectsFoo, newFoo);
+            AssertRunningMembership(monoFoo, true);
+            AssertRunningMembership(objectFoo, true);
+            AssertRunningMembership(objectsFoo, true);
+            AssertRunningMembership(newFoo, true);
+
+            UnityEngine.Object.DestroyImmediate(monoRoot);
+            UnityEngine.Object.DestroyImmediate(objectRoot);
+            UnityEngine.Object.DestroyImmediate(objectsRoot);
+            UnityEngine.Object.DestroyImmediate(newRoot);
+        }
+
+        [Test]
+        public void RemoveMonoFromUpdateKeepsMembershipSynchronized()
+        {
+            var lifecycleEvents = new System.Collections.Generic.List<string>();
+            var runningRoot = new GameObject("Updater removable mono");
+            var unknownRoot = new GameObject("Updater unknown mono");
+            var running = AddLifecycleFoo(runningRoot, "Running", lifecycleEvents);
+            var unknown = AddLifecycleFoo(unknownRoot, "Unknown", lifecycleEvents);
+
+            Toolbox.Updater.InitializeMono(running);
+            Toolbox.Updater.RemoveMonoFromUpdate(running);
+
+            AssertRunningMembership(running, false);
+            Assert.IsTrue(running.Paused);
+            Assert.DoesNotThrow(() => Toolbox.Updater.RemoveMonoFromUpdate(running));
+
+            Toolbox.Updater.InitializeMonos(new[] { running });
+
+            AssertRunningMembership(running, true);
+            AssertLifecycleInvokedOnce(running);
+            Assert.IsTrue(running.Paused, "Bulk initialization must preserve existing resume behavior");
+
+            Toolbox.Updater.RemoveMonoFromUpdate(unknown);
+            AssertRunningMembership(unknown, false);
+            Assert.IsTrue(unknown.Paused, "Removing an unknown mono must preserve existing Pause behavior");
+
+            UnityEngine.Object.DestroyImmediate(runningRoot);
+            UnityEngine.Object.DestroyImmediate(unknownRoot);
+        }
+
+        [Test]
+        public void InitializeMonosUsesReentrancySafeBatchBuffers()
+        {
+            var lifecycleEvents = new System.Collections.Generic.List<string>();
+            var firstRoot = new GameObject("Updater reentrant first");
+            var secondRoot = new GameObject("Updater reentrant second");
+            var nestedRoot = new GameObject("Updater reentrant nested");
+            var first = AddLifecycleFoo(firstRoot, "First", lifecycleEvents);
+            var second = AddLifecycleFoo(secondRoot, "Second", lifecycleEvents);
+            var nested = AddLifecycleFoo(nestedRoot, "Nested", lifecycleEvents);
+
+            first.RiseAction = () => Toolbox.Updater.InitializeMonos(new[] { nested });
+
+            Toolbox.Updater.InitializeMonos(new[] { first, second });
+
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    "First.Rise",
+                    "Nested.Rise",
+                    "Nested.Ready",
+                    "Second.Rise",
+                    "First.Ready",
+                    "Second.Ready"
+                },
+                lifecycleEvents);
+            AssertLifecycleInvokedOnce(first, second, nested);
+            AssertRunningMembership(first, true);
+            AssertRunningMembership(second, true);
+            AssertRunningMembership(nested, true);
+
+            UnityEngine.Object.DestroyImmediate(firstRoot);
+            UnityEngine.Object.DestroyImmediate(secondRoot);
+            UnityEngine.Object.DestroyImmediate(nestedRoot);
+        }
+
         private static Foo AddLifecycleFoo(
             GameObject gameObject,
             string lifecycleId,
@@ -174,6 +308,36 @@ namespace VolumeBox.Toolbox.Tests
                 Assert.AreEqual(1, monos[i].RiseCount);
                 Assert.AreEqual(1, monos[i].ReadyCount);
             }
+        }
+
+        private static void AssertRunningMembership(MonoCached mono, bool expected)
+        {
+            const System.Reflection.BindingFlags flags =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var runningListField = typeof(Updater).GetField("_RunningMonos", flags);
+            var runningSetField = typeof(Updater).GetField("_RunningMonosSet", flags);
+
+            Assert.IsNotNull(runningListField);
+            Assert.IsNotNull(runningSetField);
+
+            var runningList =
+                (System.Collections.Generic.List<MonoCached>)runningListField.GetValue(Toolbox.Updater);
+            var runningSet =
+                (System.Collections.Generic.HashSet<MonoCached>)runningSetField.GetValue(Toolbox.Updater);
+            var occurrences = 0;
+
+            for (int i = 0; i < runningList.Count; i++)
+            {
+                if (runningList[i] == mono)
+                {
+                    occurrences++;
+                }
+            }
+
+            Assert.AreEqual(expected, runningList.Contains(mono));
+            Assert.AreEqual(expected, runningSet.Contains(mono));
+            Assert.AreEqual(expected ? 1 : 0, occurrences);
+            Assert.AreEqual(runningList.Count, runningSet.Count);
         }
     }
 }
